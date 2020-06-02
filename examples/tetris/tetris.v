@@ -7,19 +7,12 @@ module main
 import rand
 import time
 import gx
-import gg
-import glfw
+import gg2 as gg
+import sokol
+import sokol.sapp
 import math
-import freetype
-
-const (
-	k_up = glfw.key_up
-	k_left = glfw.key_left
-	k_right = glfw.key_right
-	k_down = glfw.key_down
-	k_escape = glfw.key_escape
-	k_space = glfw.key_space
-)
+import gg2.ft
+import os
 
 const (
 	block_size = 20 // pixels
@@ -137,55 +130,52 @@ struct Game {
 	// gg context for drawing
 	gg          &gg.GG
 	// ft context for font drawing
-	ft          &freetype.FreeType
+	//ft          &freetype.FreeType
+	//ft          &ft.FT
 	font_loaded bool
 }
 
+fn frame(game &Game) {
+	//C.sfons_flush(game.ft.fons)
+	game.gg.begin()
+	game.draw_scene()
+	game.gg.end()
+}
+
 fn main() {
-	glfw.init_glfw()
-
-	gconfig := gg.Cfg {
-			width: win_width
-			height: win_height
-			use_ortho: true // This is needed for 2D drawing
-			create_window: true
-			window_title: 'V Tetris'
-			//window_user_ptr: game
+	// TODO
+	/*
+	f := ft.new(
+		//font_path: os.resource_abs_path('../assets/fonts/RobotoMono-Regular.ttf')
+		font_path: ('../assets/fonts/RobotoMono-Regular.ttf')
+	) or {
+		println('failed to loat the font')
+		return
 	}
-
-	fconfig := gg.Cfg{
-			width: win_width
-			height: win_height
-			use_ortho: true
-			font_path: '../assets/fonts/RobotoMono-Regular.ttf'
-			font_size: 18
-			scale: 2
-			window_user_ptr: 0
-	}
+	*/
 	mut game := &Game{
-		gg: gg.new_context(gconfig)
-		ft: freetype.new_context(fconfig)
+		//ft: f
 	}
-	game.gg.window.set_user_ptr(game) // TODO remove this when `window_user_ptr:` works
+	game.gg = gg.new_context(
+		bg_color: gx.white
+		width: win_width
+		height: win_height
+		use_ortho: true // This is needed for 2D drawing
+		create_window: true
+		window_title: 'V Tetris'
+		frame_fn: frame
+		user_data: game
+		//on_key_down: key_down
+		event_cb: on_event
+	)
 	game.init_game()
-	game.gg.window.onkeydown(key_down)
 	go game.run() // Run the game loop in a new thread
-	gg.clear(background_color)
-	game.font_loaded = game.ft != 0
-	for {
-		gg.clear(background_color)
-		game.draw_scene()
-		game.gg.render()
-		if game.gg.window.should_close() {
-			game.gg.window.destroy()
-			return
-		}
-	}
+	game.gg.run() // Run the render loop in the main thread
 }
 
 fn (mut g Game) init_game() {
 	g.parse_tetros()
-	rand.seed(time.now().unix)
+	rand.seed(int(time.now().unix))
 	g.generate_tetro()
 	g.field = [] // TODO: g.field = [][]int
 	// Generate the field, fill it with 0's, add -1's on each edge
@@ -221,7 +211,7 @@ fn (mut g Game) run() {
 			g.move_tetro()
 			g.delete_completed_lines()
 		}
-		glfw.post_empty_event() // force window redraw
+		//glfw.post_empty_event() // force window redraw
 		time.sleep_ms(timer_period)
 	}
 }
@@ -327,8 +317,8 @@ fn (g &Game) draw_tetro() {
 
 fn (g &Game) draw_block(i, j, color_idx int) {
 	color := if g.state == .gameover { gx.gray } else { colors[color_idx] }
-	g.gg.draw_rect((j - 1) * block_size, (i - 1) * block_size,
-		block_size - 1, block_size - 1, color)
+	g.gg.draw_rect(f32((j - 1) * block_size), f32((i - 1) * block_size),
+		f32(block_size - 1), f32(block_size - 1), color)
 }
 
 fn (g &Game) draw_field() {
@@ -344,17 +334,17 @@ fn (g &Game) draw_field() {
 
 fn (mut g Game) draw_ui() {
 	if g.font_loaded {
-		g.ft.draw_text(1, 3, g.score.str(), text_cfg)
+		//g.ft.draw_text(1, 3, g.score.str(), text_cfg)
 		if g.state == .gameover {
 			g.gg.draw_rect(0, win_height / 2 - text_size, win_width,
 		 								5 * text_size, ui_color)
-			g.ft.draw_text(1, win_height / 2 + 0 * text_size, 'Game Over', over_cfg)
-			g.ft.draw_text(1, win_height / 2 + 2 * text_size, 'Space to restart', over_cfg)
+			//g.ft.draw_text(1, win_height / 2 + 0 * text_size, 'Game Over', over_cfg)
+			//g.ft.draw_text(1, win_height / 2 + 2 * text_size, 'Space to restart', over_cfg)
 		} else if g.state == .paused {
 			g.gg.draw_rect(0, win_height / 2 - text_size, win_width,
 				5 * text_size, ui_color)
-			g.ft.draw_text(1, win_height / 2 + 0 * text_size, 'Game Paused', text_cfg)
-			g.ft.draw_text(1, win_height / 2 + 2 * text_size, 'SPACE to resume', text_cfg)
+			//g.ft.draw_text(1, win_height / 2 + 0 * text_size, 'Game Paused', text_cfg)
+			//g.ft.draw_text(1, win_height / 2 + 2 * text_size, 'SPACE to resume', text_cfg)
 		}
 	}
 	//g.gg.draw_rect(0, block_size, win_width, limit_thickness, ui_color)
@@ -393,19 +383,19 @@ fn parse_binary_tetro(t_ int) []Block {
 	return res
 }
 
-// TODO: this exposes the unsafe C interface, clean up
-fn key_down(wnd voidptr, key, code, action, mods int) {
-	if action != 2 && action != 1 {
-		return
+fn on_event(e &sapp.Event, game mut Game) {
+	if e.typ == .key_down {
+		game.key_down(e.key_code)
 	}
-	// Fetch the game object stored in the user pointer
-	mut game := &Game(glfw.get_window_user_pointer(wnd))
+}
+
+fn (mut game Game) key_down(key sapp.KeyCode) {
 	// global keys
 	match key {
-		k_escape {
-			glfw.set_should_close(wnd, true)
+		.escape {
+			exit(0)
 		}
-		k_space {
+		.space {
 			if game.state == .running {
 				game.state = .paused
 			} else if game.state == .paused {
@@ -423,7 +413,7 @@ fn key_down(wnd voidptr, key, code, action, mods int) {
 	}
 	// keys while game is running
 	match key {
-		k_up {
+		.up {
 			// Rotate the tetro
 			old_rotation_idx := game.rotation_idx
 			game.rotation_idx++
@@ -439,13 +429,13 @@ fn key_down(wnd voidptr, key, code, action, mods int) {
 				//game.pos_x = 1
 			}
 		}
-		k_left {
+		.left {
 			game.move_right(-1)
 		}
-		k_right {
+		.right {
 			game.move_right(1)
 		}
-		k_down {
+		.down {
 			game.move_tetro() // drop faster when the player presses <down>
 		}
 		else { }

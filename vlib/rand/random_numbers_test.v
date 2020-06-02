@@ -1,4 +1,5 @@
 import rand
+import math
 
 const (
 	rnd_count = 40
@@ -53,68 +54,3 @@ fn assert_randoms_equal(r1, r2 []int) {
 	}
 }
 
-fn test_rand_f32() {
-	for seed in seeds {
-		rand.seed(seed)
-		for _ in 0 .. rnd_count {
-			res := rand.rand_f32(100.0)
-			assert res >= 0.0
-			assert res < 100.0
-		}
-	}
-}
-
-fn test_rand_f32_in_range() {
-	for seed in seeds {
-		rand.seed(seed)
-		for _ in 0 .. rnd_count {
-			res := rand.rand_f32_in_range(1.0, 2048.0)
-			assert res >= 1.0
-			assert res < 2048.0
-		}
-	}
-}
-
-fn test_rand_f64() {
-	for seed in seeds {
-		rand.seed(seed)
-		for _ in 0 .. rnd_count {
-			res := rand.rand_f64(100.0)
-			assert res >= 0.0
-			assert res < 100.0
-		}
-	}
-}
-
-fn test_rand_f64_in_range() {
-	for seed in seeds {
-		rand.seed(seed)
-		for _ in 0 .. rnd_count {
-			res := rand.rand_f64_in_range(1.0, 2048.0)
-			assert res >= 1.0
-			assert res < 2048.0
-		}
-	}
-}
-
-fn test_rand_uniform_f32() {
-	for seed in seeds {
-		rand.seed(seed)
-		for _ in 0 .. rnd_count {
-			res := rand.rand_uniform_f32()
-			assert res >= 0.0
-			assert res < 1.0
-		}
-	}
-}
-
-fn test_rand_uniform_f64() {
-	for seed in seeds {
-		rand.seed(seed)
-		for _ in 0 .. rnd_count {
-			res := rand.rand_uniform_f64()
-			assert res >= 0.0
-			assert res < 1.0
-		}
-	}
-}

@@ -213,10 +213,10 @@ fn utf8_str_visible_length(s string) int {
 			}
 		} else if c == 0xe1 || c == 0xe2 || c == 0xef {
 			r := (u32(c) << 16) | (u32(s.str[i+1]) << 8) | s.str[i+2]
-			if r >= 0xe1aab0 && r < 0xe1ac80 // diacritical marks extended
-			|| r >= 0xe1b780 && r < 0xe1b880 // diacritical marks supplement
-			|| r >= 0xe28390 && r < 0xe28480 // diacritical marks for symbols
-			|| r >= 0xefb8a0 && r < 0xefb8b0 { // half marks
+			if (r >= 0xe1aab0 && r < 0xe1ac80) // diacritical marks extended
+			|| (r >= 0xe1b780 && r < 0xe1b880) // diacritical marks supplement
+			|| (r >= 0xe28390 && r < 0xe28480) // diacritical marks for symbols
+			|| (r >= 0xefb8a0 && r < 0xefb8b0) { // half marks
 				l--
 			}
 		}
@@ -227,7 +227,7 @@ fn utf8_str_visible_length(s string) int {
 // Reads an utf8 character from standard input
 pub fn utf8_getchar() int {
 	c := C.getchar()
-	len := utf8_len(~c)
+	len := utf8_len(byte(~c))
 	if c < 0 {
 		return 0
 	}

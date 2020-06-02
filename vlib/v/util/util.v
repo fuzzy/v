@@ -300,7 +300,7 @@ and the existing module `${modulename}` may still work.')
 	if is_verbose {
 		eprintln('check_module_is_installed: cloning from $murl ...')
 	}
-	cloning_res := os.exec('git clone $murl ~/.vmodules/$modulename') or {
+	cloning_res := os.exec('git clone $murl $mpath') or {
 		return error('git is not installed, error: $err')
 	}
 	if cloning_res.exit_code != 0 {
@@ -316,14 +316,14 @@ and the existing module `${modulename}` may still work.')
 }
 
 pub fn ensure_modules_for_all_tools_are_installed(is_verbose bool) {
-	for tool_name, tool_modules in external_module_dependencies_for_tool {
-		if is_verbose {
-			eprintln('Installing modules for tool: $tool_name ...')
-		}
-		for emodule in tool_modules {
-			util.check_module_is_installed(emodule, is_verbose) or {
-				panic(err)
-			}
-		}
-	}
+   for tool_name, tool_modules in external_module_dependencies_for_tool {
+	   if is_verbose {
+		   eprintln('Installing modules for tool: $tool_name ...')
+	   }
+	   for emodule in tool_modules {
+		   util.check_module_is_installed(emodule, is_verbose) or {
+			   panic(err)
+		   }
+	   }
+   }
 }

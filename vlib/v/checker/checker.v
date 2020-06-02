@@ -15,8 +15,8 @@ const (
 )
 
 pub struct Checker {
-	table            &table.Table
 pub mut:
+	table            &table.Table
 	file             ast.File
 	nr_errors        int
 	nr_warnings      int
@@ -59,8 +59,23 @@ pub fn (mut c Checker) check(ast_file ast.File) {
 	for stmt in ast_file.stmts {
 		c.stmt(stmt)
 	}
+	// Check scopes
+	// TODO
+	/*
+	for i, obj in c.file.global_scope.objects {
+		match obj {
+			ast.Var {
+				if it.is_mut && !it.is_changed {
+					c.warn('`$it.name` is declared as mutable, but it was never changed', it.pos)
+				}
+			}
+			else {}
+		}
+	}
+	*/
 }
 
+// not used right now
 pub fn (mut c Checker) check2(ast_file ast.File) []errors.Error {
 	c.file = ast_file
 	for stmt in ast_file.stmts {
@@ -369,7 +384,7 @@ pub fn (mut c Checker) struct_init(mut struct_init ast.StructInit) table.Type {
 				expr_type := c.expr(field.expr)
 				expr_type_sym := c.table.get_type_symbol(expr_type)
 				field_type_sym := c.table.get_type_symbol(info_field.typ)
-				if !c.assign_check(expr_type, info_field.typ) {
+				if !c.check_types(expr_type, info_field.typ) {
 					c.error('cannot assign `$expr_type_sym.name` as `$field_type_sym.name` for field `$info_field.name`',
 						field.pos)
 				}
@@ -404,9 +419,9 @@ pub fn (mut c Checker) infix_expr(mut infix_expr ast.InfixExpr) table.Type {
 	}
 	c.expected_type = table.void_type
 	mut left_type := c.expr(infix_expr.left)
-	if false && left_type == table.t_type {
-		left_type = c.cur_generic_type
-	}
+	// if false && left_type == table.t_type {
+	// left_type = c.cur_generic_type
+	// }
 	infix_expr.left_type = left_type
 	c.expected_type = left_type
 	mut right_type := c.expr(infix_expr.right)
@@ -486,8 +501,8 @@ pub fn (mut c Checker) infix_expr(mut infix_expr ast.InfixExpr) table.Type {
 					}
 				}
 				if infix_expr.op in [.div, .mod] {
-					if infix_expr.right is ast.IntegerLiteral && infix_expr.right.str() ==
-						'0' || infix_expr.right is ast.FloatLiteral && infix_expr.right.str().f64() == 0.0 {
+					if (infix_expr.right is ast.IntegerLiteral && infix_expr.right.str() ==
+						'0') || (infix_expr.right is ast.FloatLiteral && infix_expr.right.str().f64() == 0.0) {
 						oper := if infix_expr.op == .div { 'division' } else { 'modulo' }
 						c.error('$oper by zero', right_pos)
 					}
@@ -531,7 +546,7 @@ pub fn (mut c Checker) infix_expr(mut infix_expr ast.InfixExpr) table.Type {
 		.right_shift {
 			return c.check_shift(left_type, right_type, left_pos, right_pos)
 		}
-		.key_is {
+		.key_is, .not_is {
 			type_expr := infix_expr.right as ast.Type
 			typ_sym := c.table.get_type_symbol(type_expr.typ)
 			if typ_sym.kind == .placeholder {
@@ -542,7 +557,18 @@ pub fn (mut c Checker) infix_expr(mut infix_expr ast.InfixExpr) table.Type {
 			}
 			return table.bool_type
 		}
-		else {}
+		else {
+			// use `()` to make the boolean expression clear error
+			// for example: `(a && b) || c` instead of `a && b || c`
+			if infix_expr.op in [.logical_or, .and] {
+				if infix_expr.left is ast.InfixExpr {
+					e := infix_expr.left as ast.InfixExpr
+					if e.op in [.logical_or, .and] && e.op != infix_expr.op {
+						c.error('use `()` to make the boolean expression clear', infix_expr.pos)
+					}
+				}
+			}
+		}
 	}
 	// TODO: Absorb this block into the above single side check block to accelerate.
 	if left_type == table.bool_type && infix_expr.op !in [.eq, .ne, .logical_or, .and] {
@@ -572,6 +598,10 @@ pub fn (mut c Checker) infix_expr(mut infix_expr ast.InfixExpr) table.Type {
 
 fn (mut c Checker) fail_if_immutable(expr ast.Expr) {
 	match expr {
+		ast.CastExpr {
+			// TODO
+			return
+		}
 		ast.Ident {
 			scope := c.file.scope.innermost(it.pos.pos)
 			if v := scope.find_var(it.name) {
@@ -579,8 +609,9 @@ fn (mut c Checker) fail_if_immutable(expr ast.Expr) {
 					c.error('`$it.name` is immutable, declare it with `mut` to make it mutable',
 						it.pos)
 				}
+				v.is_changed = true
 			} else if it.name in c.const_names {
-				c.error('cannot assign to constant `$it.name`', it.pos)
+				c.error('cannot modify constant `$it.name`', it.pos)
 			}
 		}
 		ast.IndexExpr {
@@ -694,7 +725,7 @@ fn (mut c Checker) assign_expr(mut assign_expr ast.AssignExpr) {
 		else {}
 	}
 	// Dual sides check (compatibility check)
-	if !c.assign_check(right_type, left_type) {
+	if !c.check_types(right_type, left_type) {
 		left_type_sym := c.table.get_type_symbol(left_type)
 		right_type_sym := c.table.get_type_symbol(right_type)
 		c.error('cannot assign `$right_type_sym.name` to variable `${assign_expr.left.str()}` of type `$left_type_sym.name`',
@@ -765,6 +796,9 @@ pub fn (mut c Checker) call_method(mut call_expr ast.CallExpr) table.Type {
 			// its receiver type is defined in, show an error.
 			// println('warn $method_name lef.mod=$left_type_sym.mod c.mod=$c.mod')
 			c.error('method `${left_type_sym.name}.$method_name` is private', call_expr.pos)
+		}
+		if method.args[0].is_mut {
+			c.fail_if_immutable(call_expr.left)
 		}
 		if method.return_type == table.void_type && method.ctdefine.len > 0 && method.ctdefine !in
 			c.pref.compile_defines {
@@ -999,6 +1033,8 @@ pub fn (mut c Checker) call_fn(mut call_expr ast.CallExpr) table.Type {
 		if arg.is_mut && !call_arg.is_mut {
 			c.error('`$arg.name` is a mutable argument, you need to provide `mut`: `${call_expr.name}(mut ...)`',
 				call_arg.expr.position())
+		} else if !arg.is_mut && call_arg.is_mut {
+			c.error('`$arg.name` argument is not mutable, `mut` is not needed`', call_arg.expr.position())
 		}
 		// Handle expected interface
 		if arg_typ_sym.kind == .interface_ {
@@ -1425,7 +1461,7 @@ pub fn (mut c Checker) array_init(mut array_init ast.ArrayInit) table.Type {
 				c.expected_type = elem_type
 				continue
 			}
-			if !c.check_types(elem_type, typ) {
+			if !c.check_types(typ, elem_type) {
 				elem_type_sym := c.table.get_type_symbol(elem_type)
 				c.error('expected array element with type `$elem_type_sym.name`', array_init.pos)
 			}
@@ -1764,8 +1800,8 @@ pub fn (mut c Checker) expr(node ast.Expr) table.Type {
 		ast.CastExpr {
 			it.expr_type = c.expr(it.expr)
 			sym := c.table.get_type_symbol(it.expr_type)
-			if it.typ == table.string_type && !(sym.kind in [.byte, .byteptr] || sym.kind ==
-				.array && sym.name == 'array_byte') {
+			if it.typ == table.string_type && !(sym.kind in [.byte, .byteptr] || (sym.kind ==
+				.array && sym.name == 'array_byte')) {
 				type_name := c.table.type_to_str(it.expr_type)
 				c.error('cannot cast type `$type_name` to string, use `x.str()` instead', it.pos)
 			}

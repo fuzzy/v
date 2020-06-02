@@ -38,8 +38,7 @@ fn main() {
 	sapp.run(&desc)
 }
 
-fn init(user_data voidptr) {
-	mut state := &AppState(user_data)
+fn init(state mut AppState) {
 	// dont actually alocate this on the heap in real life
 	gfx.setup(&C.sg_desc{
 		mtl_device: sapp.metal_get_device()
@@ -137,7 +136,7 @@ fn (state &AppState) render_font() {
 	C.fonsSetColor(state.fons, white)
 	dx = 50
 	dy = 350
-	line(dx - 10, dy, dx + 250, dy)
+	line(f32(dx - 10), f32(dy), f32(dx + 250), f32(dy))
 	C.fonsSetAlign(state.fons, C.FONS_ALIGN_LEFT | C.FONS_ALIGN_TOP)
 	dx = C.fonsDrawText(state.fons, dx, dy, c'Top', C.NULL)
 	dx += 10
@@ -151,7 +150,7 @@ fn (state &AppState) render_font() {
 	C.fonsDrawText(state.fons, dx, dy, c'Bottom', C.NULL)
 	dx = 150
 	dy = 400
-	line(dx, dy - 30, dx, dy + 80.0)
+	line(f32(dx), f32(dy - 30), f32(dx), f32(dy + 80.0))
 	C.fonsSetAlign(state.fons, C.FONS_ALIGN_LEFT | C.FONS_ALIGN_BASELINE)
 	C.fonsDrawText(state.fons, dx, dy, c'Left', C.NULL)
 	dy += 30
