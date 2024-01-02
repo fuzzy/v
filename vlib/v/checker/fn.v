@@ -1902,6 +1902,9 @@ fn (mut c Checker) method_call(mut node ast.CallExpr) ast.Type {
 				c.warn('manual memory management with `free()` is only allowed in unsafe code',
 					node.pos)
 			}
+			if left_sym.kind == .array_fixed {
+				c.error('unknown method or field: ${left_sym.name}.free()', node.pos)
+			}
 			return ast.void_type
 		}
 		// call struct field fn type
@@ -2489,7 +2492,7 @@ fn (mut c Checker) post_process_generic_fns() ! {
 		for concrete_types in gtypes {
 			c.table.cur_concrete_types = concrete_types
 			c.fn_decl(mut node)
-			if node.name in ['vweb.run', 'vweb.run_at'] {
+			if node.name in ['x.vweb.run', 'x.vweb.run_at', 'vweb.run', 'vweb.run_at'] {
 				for ct in concrete_types {
 					if ct !in c.vweb_gen_types {
 						c.vweb_gen_types << ct
