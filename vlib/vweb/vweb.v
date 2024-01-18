@@ -204,9 +204,19 @@ pub fn (ctx Context) init_server() {
 	eprintln('init_server() has been deprecated, please init your web app in `fn main()`')
 }
 
+// before_accept_loop is called once the vweb app is started, and listening, but before the loop that accepts
+// incomming request connections.
+// It will be called in the main thread, that runs vweb.run/2 or vweb.run_at/2.
+// It allows you to be notified about the successfull start of your app, and to synchronise your other threads
+// with the webserver start, without error prone and slow pooling or time.sleep waiting.
 // Defining this method is optional.
-// This method is called before every request (aka middleware).
-// You can use it for checking user session cookies or to add headers.
+pub fn (ctx &Context) before_accept_loop() {
+}
+
+// before_request is called once before each request is routed.
+// It will be called in one of multiple threads in a pool, serving requests,
+// the same one, in which the matching route method will be executed right after it.
+// Defining this method is optional.
 pub fn (ctx Context) before_request() {}
 
 // TODO - test
@@ -536,15 +546,17 @@ pub fn run_at[T](global_app &T, params RunParams) ! {
 		return error('invalid nr_workers `${params.nr_workers}`, it should be above 0')
 	}
 
+	routes := generate_routes(global_app)!
+	controllers_sorted := check_duplicate_routes_in_controllers[T](global_app, routes)!
+
 	listen_address := '${params.host}:${params.port}'
 	mut l := net.listen_tcp(params.family, listen_address) or {
 		ecode := err.code()
 		return error('failed to listen ${ecode} ${err}')
 	}
-	// eprintln('>> vweb listen_address: `${listen_address}` | params.family: ${params.family} | l.addr: ${l.addr()} | params: $params')
-
-	routes := generate_routes(global_app)!
-	controllers_sorted := check_duplicate_routes_in_controllers[T](global_app, routes)!
+	$if trace_listen ? {
+		eprintln('>> vweb listen_address: `${listen_address}` | params.family: ${params.family} | l.addr: ${l.addr()} | params: ${params}')
+	}
 
 	if params.show_startup_message {
 		if params.startup_message == '' {
@@ -564,6 +576,10 @@ pub fn run_at[T](global_app &T, params RunParams) ! {
 		println('[Vweb] We have ${ws.len} workers')
 	}
 	flush_stdout()
+
+	unsafe {
+		global_app.before_accept_loop()
+	}
 
 	// Forever accept every connection that comes, and
 	// pass it through the channel, to the thread pool:

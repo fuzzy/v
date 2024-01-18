@@ -78,6 +78,7 @@ by using any of the following commands in a terminal:
         * [Array slices](#array-slices)
     * [Fixed size arrays](#fixed-size-arrays)
     * [Maps](#maps)
+        * [Map update syntax](#map-update-syntax)
 
 </td><td width=33% valign=top>
 
@@ -480,7 +481,24 @@ fn main() {
 	}
 }
 ```
+While variable shadowing is not allowed, field shadowing is allowed.
+```v
+pub struct Dimension {
+	width  int = -1
+	height int = -1
+}
 
+pub struct Test {
+	Dimension
+	width int = 100
+	// height int
+}
+
+fn main() {
+	test := Test{}
+	println('${test.width} ${test.height} ${test.Dimension.width}') // 100 -1 -1
+}
+```
 ## V Types
 
 ### Primitive types
@@ -702,6 +720,13 @@ println('[${int(x):X}]') // output as uppercase hex => [7B]
 
 println('[${10.0000:.2}]') // remove insignificant 0s at the end => [10]
 println('[${10.0000:.2f}]') // do show the 0s at the end, even though they do not change the number => [10.00]
+```
+
+V also has `r` and `R` switches, which will repeat the string the specified amount of times.
+
+```v
+println('[${'abc':3r}]') // [abcabcabc]
+println('[${'abc':3R}]') // [ABCABCABC]
 ```
 
 #### String operators
@@ -1437,6 +1462,36 @@ See all methods of
 [map](https://modules.vlang.io/index.html#map)
 and
 [maps](https://modules.vlang.io/maps.html).
+
+### Map update syntax
+
+As with stucts, V lets you initialise a map with an update applied on top of
+another map:
+
+```v
+const base_map = {
+	'a': 4
+	'b': 5
+}
+
+foo := {
+	...base_map
+	'b': 88
+	'c': 99
+}
+
+println(foo) // {'a': 4, 'b': 88, 'c': 99}
+```
+
+This is functionally equivalent to cloning the map and updating it, except that
+you don't have to declare a mutable variable:
+
+```v failcompile
+// same as above (except mutable)
+mut foo := base_map.clone()
+foo['b'] = 88
+foo['c'] = 99
+```
 
 ## Module imports
 
@@ -5610,7 +5665,7 @@ serializers for any data format. V has compile time `if` and `for` constructs:
 
 #### <h4 id="comptime-fields">.fields</h4>
 
-You can iterate over struct fields using `.fields`, it also works with generic types 
+You can iterate over struct fields using `.fields`, it also works with generic types
 (e.g. `T.fields`) and generic arguments (e.g. `param.fields` where `fn gen[T](param T) {`).
 
 ```v
@@ -6184,6 +6239,8 @@ To improve safety and maintainability, operator overloading is limited.
 
 - When overriding `<` and `==`, the return type must be strictly `bool`.
 - Both arguments must have the same type (just like with all operators in V).
+- Overloaded operators have to return the same type as the argument
+  (the exceptions are `<` and `==`).
 
 #### Other restrictions
 

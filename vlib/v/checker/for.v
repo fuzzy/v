@@ -120,7 +120,7 @@ fn (mut c Checker) for_in_stmt(mut node ast.ForInStmt) {
 			if next_fn.params.len != 1 {
 				c.error('iterator method `next()` must have 0 parameters', node.cond.pos())
 			}
-			mut val_type := next_fn.return_type.clear_flags(.option, .result)
+			mut val_type := next_fn.return_type.clear_option_and_result()
 			if node.val_is_mut {
 				val_type = val_type.ref()
 			}
@@ -199,8 +199,7 @@ fn (mut c Checker) for_in_stmt(mut node ast.ForInStmt) {
 			mut value_type := c.table.value_type(typ)
 			if sym.kind == .string {
 				value_type = ast.u8_type
-			} else if sym.kind == .aggregate
-				&& (sym.info as ast.Aggregate).types.filter(c.table.type_kind(it) !in [.array, .array_fixed, .string, .map]).len == 0 {
+			} else if sym.kind == .aggregate&& (sym.info as ast.Aggregate).types.all(c.table.type_kind(it) in [.array, .array_fixed, .string, .map]) {
 				value_type = c.table.value_type((sym.info as ast.Aggregate).types[0])
 			}
 			if value_type == ast.void_type || typ.has_flag(.result) {

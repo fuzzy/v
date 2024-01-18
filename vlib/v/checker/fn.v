@@ -99,7 +99,7 @@ fn (mut c Checker) fn_decl(mut node ast.FnDecl) {
 	if node.language == .v && node.attrs.len > 0 {
 		if attr_export := node.attrs.find_first('export') {
 			if attr_export.arg == '' {
-				c.error('missing argument for [export] attribute', attr_export.pos)
+				c.error('missing argument for @[export] attribute', attr_export.pos)
 			}
 		}
 	}
@@ -346,6 +346,8 @@ fn (mut c Checker) fn_decl(mut node ast.FnDecl) {
 						sptype := c.table.type_to_str(param_type)
 						c.error('the receiver type `${srtype}` should be the same type as the operand `${sptype}`',
 							node.pos)
+					} else if node.return_type.has_option_or_result() {
+						c.error('return type cannot be Option or Result', node.return_type_pos)
 					}
 				}
 			}
@@ -438,7 +440,7 @@ fn (mut c Checker) fn_decl(mut node ast.FnDecl) {
 	}
 
 	// vweb checks
-	if node.attrs.len > 0 && c.file.imports.filter(it.mod == 'vweb').len > 0 {
+	if node.attrs.len > 0 && c.file.imports.any(it.mod == 'vweb') {
 		// If it's a vweb action (has the ['/url'] attribute), make sure it returns a vweb.Result
 		for attr in node.attrs {
 			if attr.name.starts_with('/') {
@@ -504,7 +506,7 @@ fn (mut c Checker) anon_fn(mut node ast.AnonFn) ast.Type {
 					}
 				}
 			} else {
-				var.typ = parent_var.expr.expr_type.clear_flags(.option, .result)
+				var.typ = parent_var.expr.expr_type.clear_option_and_result()
 			}
 		} else {
 			var.typ = parent_var.typ
@@ -877,7 +879,7 @@ fn (mut c Checker) fn_call(mut node ast.CallExpr, mut continue_check &bool) ast.
 		}
 	}
 	// already imported symbol (static Foo.new() in another module)
-	if !found && fn_name.contains('__static__') && fn_name[0].is_capital() {
+	if !found && fn_name.len > 0 && fn_name[0].is_capital() {
 		if index := fn_name.index('__static__') {
 			owner_name := fn_name#[..index]
 			for import_sym in c.file.imports.filter(it.syms.any(it.name == owner_name)) {
@@ -1837,10 +1839,10 @@ fn (mut c Checker) method_call(mut node ast.CallExpr) ast.Type {
 			node.from_embed_types = [m.from_embeded_type]
 		}
 	} else {
-		if final_left_sym.kind in [.struct_, .sum_type, .interface_, .alias, .array] {
+		if final_left_sym.kind in [.struct_, .sum_type, .interface_, .array] {
 			mut parent_type := ast.void_type
 			match final_left_sym.info {
-				ast.Struct, ast.SumType, ast.Interface, ast.Alias {
+				ast.Struct, ast.SumType, ast.Interface {
 					parent_type = final_left_sym.info.parent_type
 				}
 				ast.Array {
@@ -2357,11 +2359,17 @@ fn (mut c Checker) method_call(mut node ast.CallExpr) ast.Type {
 	if is_method_from_embed {
 		node.receiver_type = node.from_embed_types.last().derive(method.params[0].typ)
 	} else if is_generic {
-		// We need the receiver to be T in cgen.
-		// TODO: cant we just set all these to the concrete type in checker? then no need in gen
+		// if receiver is generic, then cgen requires `receiver_type` to be T.
+		// and the concrete type is stored in `receiver_concrete_type` below.
 		node.receiver_type = left_type.derive(method.params[0].typ).set_flag(.generic)
 	} else {
 		node.receiver_type = method.params[0].typ
+	}
+	// if receiver_type is T, then `receiver_concrete_type` is concrete type, otherwise it is the same as `receiver_type`.
+	node.receiver_concrete_type = if is_method_from_embed {
+		node.from_embed_types.last().derive(method.params[0].typ)
+	} else {
+		method.params[0].typ
 	}
 	if left_sym.kind == .interface_ && is_method_from_embed && method.return_type.has_flag(.generic)
 		&& method.generic_names.len == 0 {
@@ -2524,7 +2532,7 @@ fn (mut c Checker) check_expected_arg_count(mut node ast.CallExpr, f &ast.Fn) ! 
 	if f.is_variadic {
 		min_required_params--
 	} else {
-		has_decompose := node.args.filter(it.expr is ast.ArrayDecompose).len > 0
+		has_decompose := node.args.any(it.expr is ast.ArrayDecompose)
 		if has_decompose {
 			// if call(...args) is present
 			min_required_params = nr_args - 1
@@ -2538,7 +2546,7 @@ fn (mut c Checker) check_expected_arg_count(mut node ast.CallExpr, f &ast.Fn) ! 
 			last_typ := f.params.last().typ
 			last_sym := c.table.sym(last_typ)
 			if last_sym.info is ast.Struct {
-				is_params := last_sym.info.attrs.filter(it.name == 'params' && !it.has_arg).len > 0
+				is_params := last_sym.info.attrs.any(it.name == 'params' && !it.has_arg)
 				if is_params {
 					// allow empty trailing struct syntax arg (`f()` where `f` is `fn(ConfigStruct)`)
 					node.args << ast.CallArg{
@@ -2644,7 +2652,7 @@ fn (mut c Checker) check_map_and_filter(is_map bool, elem_typ ast.Type, node ast
 			} else if !is_map && arg_expr.return_type != ast.bool_type {
 				if arg_expr.or_block.kind != .absent && (arg_expr.return_type.has_flag(.option)
 					|| arg_expr.return_type.has_flag(.result))
-					&& arg_expr.return_type.clear_flags(.option, .result) == ast.bool_type {
+					&& arg_expr.return_type.clear_option_and_result() == ast.bool_type {
 					return
 				}
 				c.error('type mismatch, `${arg_expr.name}` must return a bool', arg_expr.pos)
