@@ -3937,7 +3937,13 @@ fn (mut g Gen) debugger_stmt(node ast.DebuggerStmt) {
 		if obj.name !in vars {
 			if obj is ast.Var && obj.pos.pos < node.pos.pos {
 				keys.write_string('_SLIT("${obj.name}")')
-				var_typ := if obj.smartcasts.len > 0 { obj.smartcasts.last() } else { obj.typ }
+				var_typ := if obj.ct_type_var != .no_comptime {
+					g.comptime.get_comptime_var_type(ast.Ident{ obj: obj })
+				} else if obj.smartcasts.len > 0 {
+					obj.smartcasts.last()
+				} else {
+					obj.typ
+				}
 				values.write_string('{.typ=_SLIT("${g.table.type_to_str(g.unwrap_generic(var_typ))}"),.value=')
 				obj_sym := g.table.sym(obj.typ)
 				cast_sym := g.table.sym(var_typ)
@@ -4006,14 +4012,21 @@ fn (mut g Gen) debugger_stmt(node ast.DebuggerStmt) {
 						values.write_string('${func}(*(${base_typ}*)${obj.name}.data)}')
 					} else {
 						_, str_method_expects_ptr, _ := cast_sym.str_method_info()
-						deref := if str_method_expects_ptr && !obj.typ.is_ptr() {
+
+						// eprintln(">> ${obj.name} | str expects ptr? ${str_method_expects_ptr} | ptr? ${var_typ.is_ptr()} || auto heap? ${obj.is_auto_heap} | auto deref? ${obj.is_auto_deref}")
+						deref := if var_typ.has_flag(.option) {
+							''
+						} else if str_method_expects_ptr && !obj.typ.is_ptr() {
 							'&'
+						} else if obj.is_auto_heap && var_typ.is_ptr() && str_method_expects_ptr {
+							'*'
+						} else if !obj.is_auto_heap && var_typ.is_ptr() && str_method_expects_ptr {
+							''
+						} else if obj.is_auto_heap && var_typ.is_ptr() {
+							'*'
 						} else if obj.typ.is_ptr() && !obj.is_auto_deref {
 							'&'
 						} else if obj.typ.is_ptr() && obj.is_auto_deref {
-							''
-						} else if obj.is_auto_heap
-							|| (!var_typ.has_flag(.option) && var_typ.is_ptr()) {
 							'*'
 						} else {
 							''
