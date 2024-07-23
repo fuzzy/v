@@ -5,6 +5,7 @@ module ast
 
 import v.token
 import v.errors
+import v.util
 import v.pref
 
 pub type TypeDecl = AliasTypeDecl | FnTypeDecl | SumTypeDecl
@@ -282,15 +283,16 @@ pub:
 	mut_pos    token.Pos
 	next_token token.Kind
 pub mut:
-	expr                Expr // expr.field_name
-	expr_type           Type // type of `Foo` in `Foo.bar`
-	typ                 Type // type of the entire thing (`Foo.bar`)
-	name_type           Type // T in `T.name` or typeof in `typeof(expr).name`
-	or_block            OrExpr
-	gkind_field         GenericKindField // `T.name` => ast.GenericKindField.name, `T.typ` => ast.GenericKindField.typ, or .unknown
-	scope               &Scope = unsafe { nil }
-	from_embed_types    []Type // holds the type of the embed that the method is called from
-	has_hidden_receiver bool
+	expr                     Expr // expr.field_name
+	expr_type                Type // type of `Foo` in `Foo.bar`
+	typ                      Type // type of the entire thing (`Foo.bar`)
+	name_type                Type // T in `T.name` or typeof in `typeof(expr).name`
+	or_block                 OrExpr
+	gkind_field              GenericKindField // `T.name` => ast.GenericKindField.name, `T.typ` => ast.GenericKindField.typ, or .unknown
+	scope                    &Scope = unsafe { nil }
+	from_embed_types         []Type   // holds the type of the embed that the method is called from
+	generic_from_embed_types [][]Type // holds the types of the embeds for each generic instance when the same generic method is called.
+	has_hidden_receiver      bool
 }
 
 // root_ident returns the origin ident where the selector started.
@@ -340,6 +342,8 @@ pub:
 	is_deprecated    bool
 pub mut:
 	is_recursive     bool
+	is_part_of_union bool
+	container_typ    Type
 	default_expr     Expr
 	default_expr_typ Type
 	name             string
@@ -362,7 +366,7 @@ pub:
 	mod         string
 	name        string
 	is_pub      bool
-	is_markused bool // an explicit `[markused]` tag; the const will NOT be removed by `-skip-unused`, no matter what
+	is_markused bool // an explicit `@[markused]` tag; the const will NOT be removed by `-skip-unused`, no matter what
 	pos         token.Pos
 	attrs       []Attr // same value as `attrs` of the ConstDecl to which it belongs
 pub mut:
@@ -381,7 +385,7 @@ pub struct ConstDecl {
 pub:
 	is_pub bool
 	pos    token.Pos
-	attrs  []Attr // tags like `[markused]`, valid for all the consts in the list
+	attrs  []Attr // tags like `@[markused]`, valid for all the consts in the list
 pub mut:
 	fields       []ConstField // all the const fields in the `const (...)` block
 	end_comments []Comment    // comments that after last const field
@@ -498,6 +502,8 @@ pub enum StructInitKind {
 // import statement
 pub struct Import {
 pub:
+	source_name string // The original name in the source, `import abc.def` -> 'abc.def', *no matter* how the module is resolved
+	//
 	mod       string // the module name of the import
 	alias     string // the `x` in `import xxx as x`
 	pos       token.Pos
@@ -535,19 +541,20 @@ pub:
 	mod                   string // 'math.bits'
 	is_deprecated         bool
 	is_pub                bool
+	is_c_variadic         bool
 	is_variadic           bool
 	is_anon               bool
-	is_noreturn           bool        // true, when [noreturn] is used on a fn
-	is_manualfree         bool        // true, when [manualfree] is used on a fn
+	is_noreturn           bool        // true, when @[noreturn] is used on a fn
+	is_manualfree         bool        // true, when @[manualfree] is used on a fn
 	is_main               bool        // true for `fn main()`
 	is_test               bool        // true for `fn test_abcde() {}`, false for `fn test_abc(x int) {}`, or for fns that do not start with test_
-	is_conditional        bool        // true for `[if abc] fn abc(){}`
-	is_exported           bool        // true for `[export: 'exact_C_name']`
+	is_conditional        bool        // true for `@[if abc] fn abc(){}`
+	is_exported           bool        // true for `@[export: 'exact_C_name']`
 	is_keep_alive         bool        // passed memory must not be freed (by GC) before function returns
-	is_unsafe             bool        // true, when [unsafe] is used on a fn
-	is_markused           bool        // true, when an explicit `[markused]` tag was put on a fn; `-skip-unused` will not remove that fn
-	is_file_translated    bool        // true, when the file it resides in is `[translated]`
-	receiver              StructField // TODO this is not a struct field
+	is_unsafe             bool        // true, when @[unsafe] is used on a fn
+	is_markused           bool        // true, when an explicit `@[markused]` tag was put on a fn; `-skip-unused` will not remove that fn
+	is_file_translated    bool        // true, when the file it resides in is `@[translated]`
+	receiver              StructField // TODO: this is not a struct field
 	receiver_pos          token.Pos   // `(u User)` in `fn (u User) name()` position
 	is_method             bool
 	is_static_type_method bool      // true for `fn Foo.bar() {}`
@@ -571,6 +578,7 @@ pub mut:
 	params            []Param
 	stmts             []Stmt
 	defer_stmts       []DeferStmt
+	trace_fns         map[string]FnTrace
 	return_type       Type
 	return_type_pos   token.Pos // `string` in `fn (u User) name() string` position
 	has_return        bool
@@ -608,15 +616,28 @@ pub fn (f &FnDecl) new_method_with_receiver_type(new_type_ Type) FnDecl {
 }
 
 @[minify]
+pub struct FnTrace {
+pub mut:
+	name string
+pub:
+	file        string
+	line        i64
+	return_type Type
+	func        &Fn = unsafe { nil }
+	is_fn_var   bool
+}
+
+@[minify]
 pub struct Fn {
 pub:
 	is_variadic           bool
+	is_c_variadic         bool
 	language              Language
 	is_pub                bool
-	is_ctor_new           bool // `[use_new] fn JS.Array.prototype.constructor()`
-	is_deprecated         bool // `[deprecated] fn abc(){}`
-	is_noreturn           bool // `[noreturn] fn abc(){}`
-	is_unsafe             bool // `[unsafe] fn abc(){}`
+	is_ctor_new           bool // `@[use_new] fn JS.Array.prototype.constructor()`
+	is_deprecated         bool // `@[deprecated] fn abc(){}`
+	is_noreturn           bool // `@[noreturn] fn abc(){}`
+	is_unsafe             bool // `@[unsafe] fn abc(){}`
 	is_placeholder        bool
 	is_main               bool // `fn main(){}`
 	is_test               bool // `fn test_abc(){}`
@@ -624,25 +645,26 @@ pub:
 	is_method             bool // true for `fn (x T) name()`, and for interface declarations (which are also for methods)
 	is_static_type_method bool // true for `fn Foo.bar() {}`
 	no_body               bool // a pure declaration like `fn abc(x int)`; used in .vh files, C./JS. fns.
-	is_file_translated    bool // true, when the file it resides in is `[translated]`
+	is_file_translated    bool // true, when the file it resides in is `@[translated]`
 	mod                   string
 	file                  string
 	file_mode             Language
 	pos                   token.Pos
 	return_type_pos       token.Pos
 pub mut:
-	return_type       Type
-	receiver_type     Type // != 0, when .is_method == true
-	name              string
-	params            []Param
-	source_fn         voidptr // set in the checker, while processing fn declarations // TODO get rid of voidptr
-	usages            int
-	generic_names     []string
-	dep_names         []string // globals or consts dependent names
-	attrs             []Attr   // all fn attributes
-	is_conditional    bool     // true for `[if abc]fn(){}`
-	ctdefine_idx      int      // the index of the attribute, containing the compile time define [if mytag]
-	from_embeded_type Type     // for interface only, fn from the embedded interface
+	return_type        Type
+	receiver_type      Type // != 0, when .is_method == true
+	name               string
+	params             []Param
+	source_fn          voidptr // set in the checker, while processing fn declarations // TODO: get rid of voidptr
+	usages             int
+	generic_names      []string
+	dep_names          []string // globals or consts dependent names
+	attrs              []Attr   // all fn attributes
+	is_conditional     bool     // true for `[if abc]fn(){}`
+	ctdefine_idx       int      // the index of the attribute, containing the compile time define [if mytag]
+	from_embedded_type Type     // for interface only, fn from the embedded interface
+	from_embeded_type  Type     @[deprecated: 'use from_embedded_type instead'; deprecated_after: '2024-03-31']
 }
 
 fn (f &Fn) method_equals(o &Fn) bool {
@@ -663,20 +685,17 @@ pub:
 	is_auto_rec bool
 	type_pos    token.Pos
 	is_hidden   bool // interface first arg
+	on_newline  bool // whether the argument starts on a new line
 pub mut:
-	typ      Type
-	comments []Comment
+	typ Type
 }
 
 pub fn (p &Param) specifier() string {
-	if p.is_shared {
-		return 'shared'
-	} else if p.is_atomic {
-		return 'atomic'
-	} else if p.is_mut {
-		return 'mut'
-	} else {
-		return ''
+	return match true {
+		p.is_shared { 'shared' }
+		p.is_atomic { 'atomic' }
+		p.is_mut { 'mut' }
+		else { '' }
 	}
 }
 
@@ -694,8 +713,8 @@ pub fn (f &Fn) new_method_with_receiver_type(new_type_ Type) Fn {
 				new_method.params[i].typ = new_type
 			}
 		}
-		new_method.from_embeded_type = if f.from_embeded_type != 0 {
-			f.from_embeded_type
+		new_method.from_embedded_type = if f.from_embedded_type != 0 {
+			f.from_embedded_type
 		} else {
 			f.params[0].typ
 		}
@@ -746,7 +765,7 @@ pub mut:
 	is_keep_alive          bool // GC must not free arguments before fn returns
 	is_noreturn            bool // whether the function/method is marked as [noreturn]
 	is_ctor_new            bool // if JS ctor calls requires `new` before call, marked as `[use_new]` in V
-	is_file_translated     bool // true, when the file it resides in is `[translated]`
+	is_file_translated     bool // true, when the file it resides in is `@[translated]`
 	args                   []CallArg
 	expected_arg_types     []Type
 	comptime_ret_val       bool
@@ -757,6 +776,7 @@ pub mut:
 	receiver_type          Type // User / T, if receiver is generic, then cgen requires receiver_type to be T
 	receiver_concrete_type Type // if receiver_type is T, then receiver_concrete_type is concrete type, otherwise it is the same as receiver_type
 	return_type            Type
+	return_type_generic    Type   // the original generic return type from fn def
 	fn_var_type            Type   // the fn type, when `is_fn_a_const` or `is_fn_var` is true
 	const_name             string // the fully qualified name of the const, i.e. `main.c`, given `const c = abc`, and callexpr: `c()`
 	should_be_skipped      bool   // true for calls to `[if someflag?]` functions, when there is no `-d someflag`
@@ -788,6 +808,7 @@ pub mut:
 	typ             Type
 	is_tmp_autofree bool // this tells cgen that a tmp variable has to be used for the arg expression in order to free it after the call
 	pos             token.Pos
+	should_be_ptr   bool // fn expects a ptr for this arg
 	// tmp_name        string // for autofree
 }
 
@@ -807,6 +828,7 @@ pub enum ComptimeVarKind {
 	value_var // map value from `for k,v in t.$(field.name)`
 	field_var // comptime field var `a := t.$(field.name)`
 	generic_param // generic fn parameter
+	generic_var // generic var
 	smartcast // smart cast when used in `is v` (when `v` is from $for .variants)
 }
 
@@ -822,6 +844,7 @@ pub:
 pub mut:
 	is_arg        bool // fn args should not be autofreed
 	is_auto_deref bool
+	is_unwrapped  bool // ct type smartcast unwrapped
 	expr          Expr
 	typ           Type
 	orig_type     Type   // original sumtype type; 0 if it's not a sumtype
@@ -838,7 +861,7 @@ pub mut:
 	is_or        bool // `x := foo() or { ... }`
 	is_tmp       bool // for tmp for loop vars, so that autofree can skip them
 	is_auto_heap bool // value whose address goes out of scope
-	is_stack_obj bool // may be pointer to stack value (`mut` or `&` arg and not [heap] struct)
+	is_stack_obj bool // may be pointer to stack value (`mut` or `&` arg and not @[heap] struct)
 }
 
 // used for smartcasting only
@@ -865,8 +888,9 @@ pub:
 	has_expr    bool
 	pos         token.Pos
 	typ_pos     token.Pos
-	is_markused bool // an explicit `[markused]` tag; the global will NOT be removed by `-skip-unused`
+	is_markused bool // an explicit `@[markused]` tag; the global will NOT be removed by `-skip-unused`
 	is_volatile bool
+	is_exported bool // an explicit `@[export]` tag; the global will NOT be removed by `-skip-unused`
 pub mut:
 	expr     Expr
 	typ      Type
@@ -878,7 +902,7 @@ pub:
 	mod      string
 	pos      token.Pos
 	is_block bool   // __global() block
-	attrs    []Attr // tags like `[markused]`, valid for all the globals in the list
+	attrs    []Attr // tags like `@[markused]`, valid for all the globals in the list
 pub mut:
 	fields       []GlobalField
 	end_comments []Comment
@@ -908,8 +932,8 @@ pub:
 	mod           Module // the module of the source file (from `module xyz` at the top)
 	global_scope  &Scope = unsafe { nil }
 	is_test       bool // true for _test.v files
-	is_generated  bool // true for `[generated] module xyz` files; turn off notices
-	is_translated bool // true for `[translated] module xyz` files; turn off some checks
+	is_generated  bool // true for `@[generated] module xyz` files; turn off notices
+	is_translated bool // true for `@[translated] module xyz` files; turn off some checks
 pub mut:
 	idx              int    // index in an external container; can be used to refer to the file in a more efficient way, just by its integer index
 	path             string // absolute path of the source file - '/projects/v/file.v'
@@ -969,7 +993,7 @@ pub type IdentInfo = IdentFn | IdentVar
 
 pub enum IdentKind {
 	unresolved
-	blank_ident
+	blank_ident // discard identifier, `_` in `_ := 1`
 	variable
 	constant
 	global
@@ -990,6 +1014,7 @@ pub mut:
 	obj            ScopeObject
 	mod            string
 	name           string
+	full_name      string
 	kind           IdentKind
 	info           IdentInfo
 	is_mut         bool // if mut *token* is before name. Use `is_mut()` to lookup mut variable
@@ -997,39 +1022,38 @@ pub mut:
 	concrete_types []Type
 }
 
+// full_name returns the name of the ident, prefixed with the module name
+pub fn (mut i Ident) full_name() string {
+	if i.full_name != '' {
+		return i.full_name
+	}
+	if i.name.contains('.') {
+		i.full_name = i.name
+	} else {
+		i.full_name = i.mod + '.' + i.name
+	}
+	return i.full_name
+}
+
 pub fn (i &Ident) is_auto_heap() bool {
-	match i.obj {
-		Var {
-			return i.obj.is_auto_heap
-		}
-		else {
-			return false
-		}
+	return match i.obj {
+		Var { i.obj.is_auto_heap }
+		else { false }
 	}
 }
 
 pub fn (i &Ident) is_mut() bool {
 	match i.obj {
-		Var {
-			return i.obj.is_mut
-		}
-		ConstField {
-			return false
-		}
-		AsmRegister, GlobalField {
-			return true
-		}
+		Var { return i.obj.is_mut }
+		ConstField { return false }
+		AsmRegister, GlobalField { return true }
 	}
 }
 
 pub fn (i &Ident) var_info() IdentVar {
 	match i.info {
-		IdentVar {
-			return i.info
-		}
-		else {
-			panic('Ident.var_info(): info is not IdentVar variant')
-		}
+		IdentVar { return i.info }
+		else { panic('Ident.var_info(): info is not IdentVar variant') }
 	}
 }
 
@@ -1307,6 +1331,7 @@ pub mut:
 	is_volatile   bool // for disabling variable access optimisations (needed for hardware drivers)
 	is_simple     bool // `x+=2` in `for x:=1; ; x+=2`
 	has_cross_var bool
+	attr          Attr
 }
 
 // `expr as Ident`
@@ -1350,7 +1375,7 @@ pub struct EnumDecl {
 pub:
 	name             string
 	is_pub           bool
-	is_flag          bool        // true when the enum has [flag] tag,for bit field enum
+	is_flag          bool        // true when the enum has @[flag] tag,for bit field enum
 	is_multi_allowed bool        // true when the enum has [_allow_multiple_values] tag
 	comments         []Comment   // comments before the first EnumField
 	fields           []EnumField // all the enum fields
@@ -1475,6 +1500,7 @@ pub mut:
 	elem_type  Type   // element type
 	init_type  Type   // init: value type
 	typ        Type   // array type
+	alias_type Type   // alias type
 }
 
 pub struct ArrayDecompose {
@@ -1906,26 +1932,68 @@ pub mut:
 @[minify]
 pub struct ComptimeCall {
 pub:
-	pos          token.Pos
-	has_parens   bool // if $() is used, for vfmt
-	method_name  string
-	method_pos   token.Pos
-	scope        &Scope = unsafe { nil }
-	is_vweb      bool
-	is_embed     bool
-	is_env       bool
-	env_pos      token.Pos
-	is_pkgconfig bool
+	pos              token.Pos
+	has_parens       bool // if $() is used, for vfmt
+	method_name      string
+	method_pos       token.Pos
+	scope            &Scope = unsafe { nil }
+	is_vweb          bool
+	is_embed         bool // $embed_file(...)
+	is_env           bool // $env(...) // TODO: deprecate after $d() is stable
+	is_compile_value bool // $d(...)
+	env_pos          token.Pos
+	is_pkgconfig     bool
+mut:
+	is_d_resolved bool
 pub mut:
-	vweb_tmpl   File
-	left        Expr
-	left_type   Type
-	result_type Type
-	env_value   string
-	args_var    string
-	args        []CallArg
-	embed_file  EmbeddedFile
-	or_block    OrExpr
+	vweb_tmpl     File
+	left          Expr
+	left_type     Type
+	result_type   Type
+	env_value     string
+	compile_value string
+	args_var      string
+	args          []CallArg
+	embed_file    EmbeddedFile
+	or_block      OrExpr
+}
+
+// resolve_compile_value resolves the value and return type of `$d()` calls.
+// The result is stored in fields `compile_value` and `result_type`.
+// The argument `compile_values` is expected to be the `Preferences.compile_values` field.
+pub fn (mut cc ComptimeCall) resolve_compile_value(compile_values map[string]string) ! {
+	if cc.is_d_resolved {
+		return
+	}
+	if !cc.is_compile_value {
+		return error('ComptimeCall is not \$d()')
+	}
+	arg := cc.args[0] or {
+		return error('\$d() takes two arguments, a string and a primitive literal')
+	}
+	if !arg.expr.is_pure_literal() {
+		return error('\$d() values can only be pure literals')
+	}
+	typ := arg.expr.get_pure_type()
+	arg_as_string := arg.str().trim('`"\'')
+	value := compile_values[cc.args_var] or { arg_as_string }
+	validate_type_string_is_pure_literal(typ, value) or { return error(err.msg()) }
+	cc.compile_value = value
+	cc.result_type = typ
+	cc.is_d_resolved = true
+}
+
+// expr_str returns the string representation of `ComptimeCall` for use with
+// `ast.Expr`'s `str()' method (used by e.g. vfmt).
+pub fn (cc ComptimeCall) expr_str() string {
+	mut str := 'ast.ComptimeCall'
+	if cc.is_compile_value {
+		arg := cc.args[0] or { return str }
+		if arg.expr.is_pure_literal() {
+			str = "\$${cc.method_name}('${cc.args_var}', ${arg})"
+		}
+	}
+	return str
 }
 
 pub struct None {
@@ -1939,6 +2007,11 @@ pub enum SqlStmtKind {
 	delete
 	create
 	drop
+}
+
+pub enum SqlExprKind {
+	insert
+	select_
 }
 
 pub struct SqlStmt {
@@ -1970,7 +2043,10 @@ pub mut:
 
 pub struct SqlExpr {
 pub:
-	is_count   bool
+	is_count     bool
+	is_insert    bool // for insert expressions
+	inserted_var string
+
 	has_where  bool
 	has_order  bool
 	has_limit  bool
@@ -2011,13 +2087,13 @@ pub fn (expr Expr) pos() token.Pos {
 	// all uncommented have to be implemented
 	// Note: please do not print here. the language server will hang
 	// as it uses STDIO primarily to communicate ~Ned
-	match expr {
+	return match expr {
 		AnonFn {
-			return expr.decl.pos
+			expr.decl.pos
 		}
 		CTempVar, EmptyExpr {
 			// println('compiler bug, unhandled EmptyExpr pos()')
-			return token.Pos{}
+			token.Pos{}
 		}
 		NodeError, ArrayDecompose, ArrayInit, AsCast, Assoc, AtExpr, BoolLiteral, CallExpr,
 		CastExpr, ChanInit, CharLiteral, ConcatExpr, Comment, ComptimeCall, ComptimeSelector,
@@ -2026,21 +2102,22 @@ pub fn (expr Expr) pos() token.Pos {
 		PostfixExpr, PrefixExpr, RangeExpr, SelectExpr, SelectorExpr, SizeOf, SqlExpr,
 		StringInterLiteral, StringLiteral, StructInit, TypeNode, TypeOf, UnsafeExpr, ComptimeType,
 		LambdaExpr, Nil {
-			return expr.pos
+			expr.pos
 		}
 		IndexExpr {
 			if expr.or_expr.kind != .absent {
-				return expr.or_expr.pos
+				expr.or_expr.pos
+			} else {
+				expr.pos
 			}
-			return expr.pos
 		}
 		IfGuardExpr {
-			return expr.expr.pos()
+			expr.expr.pos()
 		}
 		InfixExpr {
 			left_pos := expr.left.pos()
 			right_pos := expr.right.pos()
-			return token.Pos{
+			token.Pos{
 				line_nr: expr.pos.line_nr
 				pos: left_pos.pos
 				len: right_pos.pos - left_pos.pos + right_pos.len
@@ -2074,13 +2151,13 @@ pub fn (expr Expr) is_expr() bool {
 }
 
 pub fn (expr Expr) get_pure_type() Type {
-	match expr {
-		BoolLiteral { return bool_type }
-		CharLiteral { return char_type }
-		FloatLiteral { return f64_type }
-		StringLiteral { return string_type }
-		IntegerLiteral { return i64_type }
-		else { return void_type }
+	return match expr {
+		BoolLiteral { bool_type }
+		CharLiteral { char_type }
+		FloatLiteral { f64_type }
+		StringLiteral { string_type }
+		IntegerLiteral { i64_type }
+		else { void_type }
 	}
 }
 
@@ -2092,22 +2169,11 @@ pub fn (expr Expr) is_pure_literal() bool {
 }
 
 pub fn (expr Expr) is_auto_deref_var() bool {
-	match expr {
-		Ident {
-			if expr.obj is Var {
-				if expr.obj.is_auto_deref {
-					return true
-				}
-			}
-		}
-		PrefixExpr {
-			if expr.op == .amp && expr.right.is_auto_deref_var() {
-				return true
-			}
-		}
-		else {}
+	return match expr {
+		Ident { expr.obj is Var && expr.obj.is_auto_deref }
+		PrefixExpr { expr.op == .amp && expr.right.is_auto_deref_var() }
+		else { false }
 	}
-	return false
 }
 
 // returns if an expression can be used in `lock x, y.z {`
@@ -2367,10 +2433,8 @@ pub fn (node Node) children() []Node {
 // helper for dealing with `m[k1][k2][k3][k3] = value`
 pub fn (mut lx IndexExpr) recursive_mapset_is_setter(val bool) {
 	lx.is_setter = val
-	if mut lx.left is IndexExpr {
-		if lx.left.is_map {
-			lx.left.recursive_mapset_is_setter(val)
-		}
+	if mut lx.left is IndexExpr && lx.left.is_map {
+		lx.left.recursive_mapset_is_setter(val)
 	}
 }
 
@@ -2480,55 +2544,80 @@ fn gen_all_registers(mut t Table, without_numbers []string, with_numbers map[str
 
 // is `expr` a literal, i.e. it does not depend on any other declarations (C compile time constant)
 pub fn (expr Expr) is_literal() bool {
-	match expr {
+	return match expr {
 		BoolLiteral, CharLiteral, FloatLiteral, IntegerLiteral, StringLiteral, StringInterLiteral {
-			return true
+			true
 		}
 		PrefixExpr {
-			return expr.right.is_literal()
+			expr.right.is_literal()
 		}
 		InfixExpr {
-			return expr.left.is_literal() && expr.right.is_literal()
+			expr.left.is_literal() && expr.right.is_literal()
 		}
 		ParExpr {
-			return expr.expr.is_literal()
+			expr.expr.is_literal()
 		}
 		CastExpr {
-			return !expr.has_arg && expr.expr.is_literal() && (expr.typ.is_any_kind_of_pointer()
+			!expr.has_arg && expr.expr.is_literal() && (expr.typ.is_any_kind_of_pointer()
 				|| expr.typ in [i8_type, i16_type, int_type, i64_type, u8_type, u16_type, u32_type, u64_type, f32_type, f64_type, char_type, bool_type, rune_type])
 		}
 		SizeOf, IsRefType {
-			return expr.is_type || expr.expr.is_literal()
+			expr.is_type || expr.expr.is_literal()
 		}
 		else {
-			return false
+			false
 		}
 	}
 }
 
 pub fn (e Expr) is_nil() bool {
-	if e is Nil {
-		return true
-	}
-	if e is UnsafeExpr {
-		if e.expr is Nil {
-			return true
-		}
-	}
-	return false
+	return e is Nil || (e is UnsafeExpr && e.expr is Nil)
 }
 
 pub fn type_can_start_with_token(tok &token.Token) bool {
-	match tok.kind {
+	return match tok.kind {
 		.name {
-			return (tok.lit.len > 0 && tok.lit[0].is_capital())
+			(tok.lit.len > 0 && tok.lit[0].is_capital())
 				|| builtin_type_names_matcher.matches(tok.lit)
 		}
 		// Note: return type (T1, T2) should be handled elsewhere
 		.amp, .key_fn, .lsbr, .question {
-			return true
+			true
 		}
-		else {}
+		else {
+			false
+		}
 	}
-	return false
+}
+
+// validate_type_string_is_pure_literal returns `Error` if `str` can not be converted
+// to pure literal `typ` (`i64`, `f64`, `bool`, `char` or `string`).
+pub fn validate_type_string_is_pure_literal(typ Type, str string) ! {
+	if typ == bool_type {
+		if !(str == 'true' || str == 'false') {
+			return error('bool literal `true` or `false` expected, found "${str}"')
+		}
+	} else if typ == char_type {
+		if str.starts_with('\\') {
+			if str.len <= 1 {
+				return error('empty escape sequence found')
+			}
+			if !util.is_escape_sequence(str[1]) {
+				return error('char literal escape sequence expected, found "${str}"')
+			}
+		} else if str.len != 1 {
+			return error('char literal expected, found "${str}"')
+		}
+	} else if typ == f64_type {
+		if str.count('.') != 1 {
+			return error('f64 literal expected, found "${str}"')
+		}
+	} else if typ == string_type {
+	} else if typ == i64_type {
+		if !str.is_int() {
+			return error('i64 literal expected, found "${str}"')
+		}
+	} else {
+		return error('expected pure literal, found "${str}"')
+	}
 }

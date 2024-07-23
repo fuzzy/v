@@ -99,7 +99,7 @@ pub mut:
 
 // free frees the resources allocated for the given FlagParser instance.
 // It should be called manually in functions that use it, and that are
-// marked with `[manualfree]`,  otherwise, it is called automatically
+// marked with `@[manualfree]`,  otherwise, it is called automatically
 // in programs, compiled with `-autofree`. Note: you should NOT use the
 // instance over which you have called .free() for anything after the call.
 @[unsafe]
@@ -607,25 +607,19 @@ pub fn (mut fs FlagParser) finalize() ![]string {
 			}
 		}
 	}
-	if remaining.len < fs.min_free_args && fs.min_free_args > 0 {
+	remaining << fs.all_after_dashdash
+	if fs.min_free_args > remaining.len {
 		return &ArgsCountError{
 			want: fs.min_free_args
 			got: remaining.len
 		}
 	}
-	if remaining.len > fs.max_free_args && fs.max_free_args > 0 {
+	if fs.max_free_args < remaining.len {
 		return &ArgsCountError{
 			want: fs.max_free_args
 			got: remaining.len
 		}
 	}
-	if remaining.len > 0 && fs.max_free_args == 0 && fs.min_free_args == 0 {
-		return &ArgsCountError{
-			want: 0
-			got: remaining.len
-		}
-	}
-	remaining << fs.all_after_dashdash
 	return remaining
 }
 

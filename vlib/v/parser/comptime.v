@@ -5,11 +5,10 @@ module parser
 
 import os
 import v.ast
-import v.pref
 import v.token
 
 const supported_comptime_calls = ['html', 'tmpl', 'env', 'embed_file', 'pkgconfig', 'compile_error',
-	'compile_warn', 'res']
+	'compile_warn', 'd', 'res']
 const comptime_types = ['map', 'array', 'array_dynamic', 'array_fixed', 'int', 'float', 'struct',
 	'interface', 'enum', 'sumtype', 'alias', 'function', 'option', 'string']
 
@@ -92,7 +91,7 @@ fn (mut p Parser) hash() ast.HashStmt {
 	}
 	return ast.HashStmt{
 		mod: p.mod
-		source_file: p.file_name
+		source_file: p.file_path
 		val: val
 		kind: kind
 		main: main_str
@@ -107,10 +106,10 @@ fn (mut p Parser) comptime_call() ast.ComptimeCall {
 	}
 	start_pos := p.tok.pos()
 	p.check(.dollar)
-	error_msg := 'only `\$tmpl()`, `\$env()`, `\$embed_file()`, `\$pkgconfig()`, `\$vweb.html()`, `\$compile_error()`, `\$compile_warn()` and `\$res()` comptime functions are supported right now'
+	error_msg := 'only `\$tmpl()`, `\$env()`, `\$embed_file()`, `\$pkgconfig()`, `\$vweb.html()`, `\$compile_error()`, `\$compile_warn()`, `\$d()` and `\$res()` comptime functions are supported right now'
 	if p.peek_tok.kind == .dot {
 		name := p.check_name() // skip `vweb.html()` TODO
-		if name != 'vweb' {
+		if name != 'vweb' && name != 'veb' {
 			p.error(error_msg)
 			return err_node
 		}
@@ -123,7 +122,6 @@ fn (mut p Parser) comptime_call() ast.ComptimeCall {
 	}
 	is_embed_file := method_name == 'embed_file'
 	is_html := method_name == 'html'
-	// $env('ENV_VAR_NAME')
 	p.check(.lpar)
 	arg_pos := p.tok.pos()
 	if method_name in ['env', 'pkgconfig', 'compile_error', 'compile_warn'] {
@@ -159,6 +157,27 @@ fn (mut p Parser) comptime_call() ast.ComptimeCall {
 		return ast.ComptimeCall{
 			scope: unsafe { nil }
 			method_name: method_name
+			pos: start_pos.extend(p.prev_tok.pos())
+		}
+	} else if method_name == 'd' {
+		const_string := p.tok.lit
+		// const_name_pos := p.tok.pos()
+		p.check(.string)
+		p.check(.comma)
+		arg_expr := p.expr(0)
+		args := [
+			ast.CallArg{
+				expr: arg_expr
+				pos: p.tok.pos()
+			},
+		]
+		p.check(.rpar)
+		return ast.ComptimeCall{
+			scope: unsafe { nil }
+			is_compile_value: true
+			method_name: method_name
+			args_var: const_string
+			args: args
 			pos: start_pos.extend(p.prev_tok.pos())
 		}
 	}
@@ -282,7 +301,7 @@ fn (mut p Parser) comptime_call() ast.ComptimeCall {
 	// the tmpl inherits all parent scopes. previous functionality was just to
 	// inherit the scope from which the comptime call was made and no parents.
 	// this is much simpler and allows access to globals. can be changed if needed.
-	mut file := parse_comptime(tmpl_path, v_code, p.table, p.pref, p.scope)
+	mut file := parse_comptime(tmpl_path, v_code, mut p.table, p.pref, mut p.scope)
 	file.path = tmpl_path
 	return ast.ComptimeCall{
 		scope: unsafe { nil }
@@ -311,8 +330,8 @@ fn (mut p Parser) comptime_for() ast.ComptimeFor {
 	mut typ_pos := p.tok.pos()
 	lang := p.parse_language()
 	mut typ := ast.void_type
-	if p.tok.lit[0].is_capital() {
-		typ = p.parse_any_type(lang, false, false, false)
+	if p.tok.lit[0].is_capital() || p.tok.lit in p.imports {
+		typ = p.parse_any_type(lang, false, true, false)
 	} else {
 		expr = p.ident(lang)
 		p.mark_var_as_used((expr as ast.Ident).name)
@@ -360,7 +379,7 @@ fn (mut p Parser) comptime_for() ast.ComptimeFor {
 		'attributes' {
 			p.scope.register(ast.Var{
 				name: val_var
-				typ: p.table.find_type_idx('StructAttribute')
+				typ: p.table.find_type_idx('VAttribute')
 				pos: var_pos
 			})
 			kind = .attributes
@@ -403,6 +422,7 @@ fn (mut p Parser) at() ast.AtExpr {
 		'@VEXE' { token.AtKind.vexe_path }
 		'@VEXEROOT' { token.AtKind.vexeroot_path }
 		'@VMODROOT' { token.AtKind.vmodroot_path }
+		'@VMODHASH' { token.AtKind.vmod_hash }
 		'@VROOT' { token.AtKind.vroot_path } // deprecated, use @VEXEROOT or @VMODROOT
 		else { token.AtKind.unknown }
 	}

@@ -131,7 +131,7 @@ fn json(file string) string {
 		pref: pref_
 	}
 	// parse file with comment
-	ast_file := parser.parse_file(file, t.table, .parse_comments, t.pref)
+	ast_file := parser.parse_file(file, mut t.table, .parse_comments, t.pref)
 	t.root = t.ast_file(ast_file)
 	// generate the ast string
 	s := json_print(t.root)
@@ -140,10 +140,10 @@ fn json(file string) string {
 
 // the ast tree
 struct Tree {
-	table &ast.Table        = unsafe { nil }
-	pref  &pref.Preferences = unsafe { nil }
+	pref &pref.Preferences = unsafe { nil }
 mut:
-	root Node // the root of tree
+	table &ast.Table = unsafe { nil }
+	root  Node // the root of tree
 }
 
 // tree node
@@ -448,6 +448,7 @@ fn (t Tree) stmt(node ast.Stmt) &Node {
 fn (t Tree) import_module(node ast.Import) &Node {
 	mut obj := new_object()
 	obj.add_terse('ast_type', t.string_node('Import'))
+	obj.add_terse('source_name', t.string_node(node.source_name))
 	obj.add_terse('mod', t.string_node(node.mod))
 	obj.add_terse('alias', t.string_node(node.alias))
 	obj.add_terse('syms', t.array_node_import_symbol(node.syms))
@@ -846,6 +847,12 @@ fn (t Tree) arg(node ast.Param) &Node {
 	obj.add_terse('name', t.string_node(node.name))
 	obj.add_terse('typ', t.type_node(node.typ))
 	obj.add_terse('is_mut', t.bool_node(node.is_mut))
+	obj.add_terse('is_shared', t.bool_node(node.is_shared))
+	obj.add_terse('is_atomic', t.bool_node(node.is_atomic))
+	obj.add_terse('is_auto_rec', t.bool_node(node.is_auto_rec))
+	obj.add_terse('on_newline', t.bool_node(node.on_newline))
+	obj.add('pos', t.pos(node.pos))
+	obj.add('type_pos', t.pos(node.type_pos))
 	return obj
 }
 
@@ -1018,6 +1025,7 @@ fn (t Tree) comptime_call(node ast.ComptimeCall) &Node {
 	obj.add_terse('result_type', t.type_node(node.result_type))
 	obj.add('scope', t.scope(node.scope))
 	obj.add_terse('env_value', t.string_node(node.env_value))
+	obj.add_terse('compile_value', t.string_node(node.compile_value))
 	obj.add('pos', t.pos(node.pos))
 	obj.add_terse('args', t.array_node_call_arg(node.args))
 	obj.add_terse('or_block', t.or_expr(node.or_block))
@@ -1559,6 +1567,7 @@ fn (t Tree) call_arg(node ast.CallArg) &Node {
 	obj.add_terse('is_mut', t.bool_node(node.is_mut))
 	obj.add_terse('share', t.enum_node(node.share))
 	obj.add_terse('expr', t.expr(node.expr))
+	obj.add_terse('should_be_ptr', t.bool_node(node.should_be_ptr))
 	obj.add('is_tmp_autofree', t.bool_node(node.is_tmp_autofree))
 	obj.add('pos', t.pos(node.pos))
 	obj.add('comments', t.array_node_comment(node.comments))

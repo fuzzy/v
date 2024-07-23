@@ -16,7 +16,7 @@ import runtime
 // math.bits is needed by strconv.ftoa
 pub const builtin_module_parts = ['math.bits', 'strconv', 'dlmalloc', 'strconv.ftoa', 'strings',
 	'builtin']
-pub const bundle_modules = ['clipboard', 'fontstash', 'gg', 'gx', 'sokol', 'szip', 'ui']
+pub const bundle_modules = ['clipboard', 'fontstash', 'gg', 'gx', 'sokol', 'szip', 'ui']!
 
 pub const external_module_dependencies_for_tool = {
 	'vdoc': ['markdown']
@@ -34,7 +34,7 @@ const const_tabs = [
 	'\t\t\t\t\t\t\t\t',
 	'\t\t\t\t\t\t\t\t\t',
 	'\t\t\t\t\t\t\t\t\t\t',
-]
+]!
 
 pub const nr_jobs = runtime.nr_jobs()
 
@@ -42,8 +42,9 @@ pub fn module_is_builtin(mod string) bool {
 	return mod in util.builtin_module_parts
 }
 
+@[direct_array_access]
 pub fn tabs(n int) string {
-	return if n < util.const_tabs.len { util.const_tabs[n] } else { '\t'.repeat(n) }
+	return if n >= 0 && n < util.const_tabs.len { util.const_tabs[n] } else { '\t'.repeat(n) }
 }
 
 //
@@ -112,6 +113,78 @@ pub fn resolve_env_value(str string, check_for_presence bool) !string {
 		return resolve_env_value(rep, check_for_presence)
 	}
 	return rep
+}
+
+const d_sig = "\$d('"
+
+// resolve_d_value replaces all occurrences of `$d('ident','value')`
+// in `str` with either the default `'value'` param or a compile value passed via `-d ident=value`.
+pub fn resolve_d_value(compile_values map[string]string, str string) !string {
+	at := str.index(util.d_sig) or {
+		return error('no "${util.d_sig}' + '...\')" could be found in "${str}".')
+	}
+	mut all_parsed := util.d_sig
+	mut ch := u8(`.`)
+	mut d_ident := ''
+	mut i := 0
+	for i = at + util.d_sig.len; i < str.len && ch != `'`; i++ {
+		ch = u8(str[i])
+		all_parsed += ch.ascii_str()
+		if ch.is_letter() || ch.is_digit() || ch == `_` {
+			d_ident += ch.ascii_str()
+		} else {
+			if !(ch == `'`) {
+				if ch == `$` {
+					return error('cannot use string interpolation in compile time \$d() expression')
+				}
+				return error('invalid `\$d` identifier in "${str}", invalid character "${ch.ascii_str()}"')
+			}
+		}
+	}
+	if d_ident == '' {
+		return error('first argument of `\$d` must be a string identifier')
+	}
+
+	// at this point we should have a valid identifier in `d_ident`.
+	// Next we parse out the default string value
+
+	// advance past the `,` and the opening `'` in second argument, or ... eat whatever is there
+	all_parsed += u8(str[i]).ascii_str()
+	i++
+	all_parsed += u8(str[i]).ascii_str()
+	i++
+	// Rinse, repeat for the expected default value string
+	ch = u8(`.`)
+	mut d_default_value := ''
+	for ; i < str.len && ch != `'`; i++ {
+		ch = u8(str[i])
+		all_parsed += ch.ascii_str()
+		if !(ch == `'`) {
+			d_default_value += ch.ascii_str()
+		}
+		if ch == `$` {
+			return error('cannot use string interpolation in compile time \$d() expression')
+		}
+	}
+	if d_default_value == '' {
+		return error('second argument of `\$d` must be a pure literal')
+	}
+	// at this point we have the identifier and the default value.
+	// now we need to resolve which one to use from `compile_values`.
+	d_value := compile_values[d_ident] or { d_default_value }
+	// if more `$d()` calls remains, resolve those as well:
+	rep := str.replace_once(all_parsed + ')', d_value)
+	if rep.contains(util.d_sig) {
+		return resolve_d_value(compile_values, rep)
+	}
+	return rep
+}
+
+// is_escape_sequence returns `true` if `c` is considered a valid escape sequence denoter.
+@[inline]
+pub fn is_escape_sequence(c u8) bool {
+	return c in [`x`, `u`, `e`, `n`, `r`, `t`, `v`, `a`, `f`, `b`, `\\`, `\``, `$`, `@`, `?`, `{`,
+		`}`, `'`, `"`, `U`]
 }
 
 // launch_tool - starts a V tool in a separate process, passing it the `args`.
@@ -270,7 +343,7 @@ pub fn should_recompile_tool(vexe string, tool_source string, tool_name string, 
 		// eprintln('>>> should_recompile_tool: tool_source: $tool_source | $single_file_recompile | $newest_sfile')
 		return single_file_recompile
 	}
-	// TODO Caching should be done on the `vlib/v` level.
+	// TODO: Caching should be done on the `vlib/v` level.
 	mut should_compile := false
 	if !os.exists(tool_exe) {
 		should_compile = true
@@ -350,7 +423,7 @@ pub fn cached_read_source_file(path string) !string {
 	$if trace_cached_read_source_file ? {
 		println('cached_read_source_file            ${path}')
 	}
-	if path.len == 0 {
+	if path == '' {
 		unsafe { cache.sources.free() }
 		unsafe { free(cache) }
 		cache = &SourceCache(unsafe { nil })

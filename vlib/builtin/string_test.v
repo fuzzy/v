@@ -44,6 +44,8 @@ fn test_ends_with() {
 fn test_between() {
 	s := 'hello [man] how you doing'
 	assert s.find_between('[', ']') == 'man'
+	assert s.find_between('[', 'A') == ''
+	assert s.find_between('A', ']') == ''
 }
 
 fn test_compare() {
@@ -594,6 +596,9 @@ fn test_is_int() {
 fn test_trim_space() {
 	a := ' a '
 	assert a.trim_space() == 'a'
+	assert a.trim_space_left() == 'a '
+	assert a.trim_space_right() == ' a'
+
 	code := '
 
 fn main() {
@@ -604,7 +609,19 @@ fn main() {
 	code_clean := 'fn main() {
         println(2)
 }'
+	code_trim_right := '
+
+fn main() {
+        println(2)
+}'
+	code_trim_left := 'fn main() {
+        println(2)
+}
+
+'
 	assert code.trim_space() == code_clean
+	assert code.trim_space_right() == code_trim_right
+	assert code.trim_space_left() == code_trim_left
 }
 
 fn test_join() {
@@ -811,6 +828,52 @@ fn test_to_num() {
 	assert big.i64() == 93993993939322
 }
 
+fn test_to_u8_array() {
+	// empty string
+	assert ''.u8_array() == []
+	assert '0x'.u8_array() == []
+	assert '0X'.u8_array() == []
+	assert '0b'.u8_array() == []
+	assert '0B'.u8_array() == []
+	// invalid digit
+	assert '-123'.u8_array() == []
+	assert '1_2xt'.u8_array() == []
+	assert 'd1_2xt'.u8_array() == []
+
+	// ---------------------------------
+	// hex test
+	// invalid hex digit
+	assert '0X-123'.u8_array() == []
+	assert '0O12'.u8_array() == []
+	// odd number of digits
+	assert '0x1'.u8_array() == [u8(0x01)]
+	assert '0x123'.u8_array() == [u8(0x01), 0x23]
+	assert '0x1_23'.u8_array() == [u8(0x01), 0x23]
+
+	// long digits
+	long_u8 := [u8(0x00), 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb, 0xcc,
+		0xdd, 0xee, 0xff]
+	assert '0x00112233445566778899aabbccddeeff'.u8_array() == long_u8
+	assert '0x00_112_2334455667788_99aabbccddeeff'.u8_array() == long_u8
+	assert '0x00112233445566778899AABBCCDDEEFF'.u8_array() == long_u8
+	assert '0x001_12233445566778899A_ABBCCDDEEFF'.u8_array() == long_u8
+
+	// ---------------------------------
+	// bin test
+	// invalid bin digit
+	assert '0b-123'.u8_array() == []
+	assert '0B12'.u8_array() == []
+	// not enough length
+	assert '0b0'.u8_array() == [u8(0x00)]
+	assert '0b1'.u8_array() == [u8(0x01)]
+	assert '0b101'.u8_array() == [u8(0x05)]
+	assert '0b0101'.u8_array() == [u8(0x05)]
+	// long digits
+	assert '0b0101_0101'.u8_array() == [u8(0x55)]
+	assert '0b0101010110101010'.u8_array() == [u8(0x55), 0xaa]
+	assert '0b0101010110101010_0101010110101010'.u8_array() == [u8(0x55), 0xaa, 0x55, 0xaa]
+}
+
 fn test_inter_format_string() {
 	float_num := 1.52345
 	float_num_string := '-${float_num:.3f}-'
@@ -967,6 +1030,11 @@ fn test_lower() {
 	assert s.to_lower() == 'hi'
 	assert 'aloha!'[0] == `a`
 	assert 'aloha!'[5] == `!`
+	s = '123'
+	assert !s.is_lower()
+	assert s.to_lower() == '123'
+	s = ''
+	assert !s.is_lower()
 }
 
 fn test_upper() {
@@ -987,6 +1055,11 @@ fn test_upper() {
 	s = 'HI'
 	assert s.is_upper()
 	assert s.to_upper() == 'HI'
+	s = '123'
+	assert !s.is_upper()
+	assert s.to_upper() == '123'
+	s = ''
+	assert !s.is_upper()
 }
 
 fn test_capitalize() {
@@ -1065,7 +1138,7 @@ fn test_repeat() {
 	assert s2.repeat(5) == s2
 	assert s2.repeat(1) == s2
 	assert s2.repeat(0) == s2
-	// TODO Add test for negative values
+	// TODO: Add test for negative values
 }
 
 fn test_starts_with() {
@@ -1263,7 +1336,7 @@ fn test_string_literal_with_backslash_followed_by_newline() {
     Five \\\\\
     end'
 	assert b == 'One Two Three ${single_backslash}Four ${double_backslash}${newline}    Five ${double_backslash}end'
-	
+
 	// Note `\\` is followed *directly* by a newline, but `\\` is just an escape for `\`,
 	// and thus the newline has no special meaning, and should go into the string literal.
 	c := 'Hello\\
@@ -1434,26 +1507,26 @@ fn test_index_u8() {
 	//
 }
 
-fn test_index_last() {
-	assert 'abcabca'.index_last('ca')? == 5
-	assert 'abcabca'.index_last('ab')? == 3
-	assert 'abcabca'.index_last('b')? == 4
-	assert 'Zabcabca'.index_last('Z')? == 0
-	x := 'Zabcabca'.index_last('Y')
+fn test_last_index() {
+	assert 'abcabca'.last_index('ca')? == 5
+	assert 'abcabca'.last_index('ab')? == 3
+	assert 'abcabca'.last_index('b')? == 4
+	assert 'Zabcabca'.last_index('Z')? == 0
+	x := 'Zabcabca'.last_index('Y')
 	assert x == none
 	// TODO: `assert 'Zabcabca'.index_last('Y') == none` is a cgen error, 2023/12/04
 }
 
-fn test_index_u8_last() {
-	assert 'abcabca'.index_u8_last(`a`) == 6
-	assert 'abcabca'.index_u8_last(`c`) == 5
-	assert 'abcabca'.index_u8_last(`b`) == 4
-	assert 'Zabcabca'.index_u8_last(`Z`) == 0
+fn test_last_index_u8() {
+	assert 'abcabca'.last_index_u8(`a`) == 6
+	assert 'abcabca'.last_index_u8(`c`) == 5
+	assert 'abcabca'.last_index_u8(`b`) == 4
+	assert 'Zabcabca'.last_index_u8(`Z`) == 0
 	//
-	assert 'abc'.index_u8(`d`) == -1
-	assert 'abc'.index_u8(`A`) == -1
-	assert 'abc'.index_u8(`B`) == -1
-	assert 'abc'.index_u8(`C`) == -1
+	assert 'abc'.last_index_u8(`d`) == -1
+	assert 'abc'.last_index_u8(`A`) == -1
+	assert 'abc'.last_index_u8(`B`) == -1
+	assert 'abc'.last_index_u8(`C`) == -1
 }
 
 fn test_contains_byte() {
@@ -1462,4 +1535,29 @@ fn test_contains_byte() {
 	assert 'abc abca'.contains_u8(`c`)
 	assert 'abc abca'.contains_u8(` `)
 	assert !'abc abca'.contains_u8(`A`)
+}
+
+fn test_camel_to_snake() {
+	assert 'Abcd'.camel_to_snake() == 'abcd'
+	assert 'aBcd'.camel_to_snake() == 'a_bcd'
+	assert 'AAbb'.camel_to_snake() == 'aa_bb'
+	assert 'aaBB'.camel_to_snake() == 'aa_bb'
+	assert 'aaBbCcDD'.camel_to_snake() == 'aa_bb_cc_dd'
+	assert 'AAbbCC'.camel_to_snake() == 'aa_bb_cc'
+	assert 'aaBBcc'.camel_to_snake() == 'aa_bb_cc'
+	assert 'aa_BB'.camel_to_snake() == 'aa_bb'
+	assert 'aa__BB'.camel_to_snake() == 'aa__bb'
+	assert 'JVM_PUBLIC_ACC'.camel_to_snake() == 'jvm_public_acc'
+	assert '_ISspace'.camel_to_snake() == '_is_space'
+	assert '_aBcd'.camel_to_snake() == '_a_bcd'
+	assert '_a_Bcd'.camel_to_snake() == '_a_bcd'
+	assert '_AbCDe_'.camel_to_snake() == '_ab_cd_e_'
+}
+
+fn test_snake_to_camel() {
+	assert 'abcd'.snake_to_camel() == 'Abcd'
+	assert 'ab_cd'.snake_to_camel() == 'AbCd'
+	assert 'ab_cd_efg'.snake_to_camel() == 'AbCdEfg'
+	assert '_abcd'.snake_to_camel() == 'Abcd'
+	assert '_abcd_'.snake_to_camel() == 'Abcd'
 }

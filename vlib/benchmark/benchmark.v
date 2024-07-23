@@ -52,7 +52,7 @@ pub fn new_benchmark_pointer() &Benchmark {
 	}
 }
 
-// set_total_expected_steps sets the the total amount of steps the benchmark is expected to take.
+// set_total_expected_steps sets the total amount of steps the benchmark is expected to take.
 pub fn (mut b Benchmark) set_total_expected_steps(n int) {
 	b.nexpected_steps = n
 }
@@ -153,11 +153,13 @@ pub fn (mut b Benchmark) record_measure(label string) i64 {
 // If it is set, the preparation time (compile time) will be shown before the measured runtime.
 @[params]
 pub struct MessageOptions {
+pub:
 	preparation time.Duration // the duration of the preparation time for the step
 }
 
 // step_message_with_label_and_duration returns a string describing the current step.
-pub fn (b &Benchmark) step_message_with_label_and_duration(label string, msg string, sduration time.Duration, opts MessageOptions) string {
+pub fn (b &Benchmark) step_message_with_label_and_duration(label string, msg string, sduration time.Duration,
+	opts MessageOptions) string {
 	timed_line := b.tdiff_in_ms(msg, sduration.microseconds())
 	if b.nexpected_steps > 1 {
 		mut sprogress := ''
@@ -187,7 +189,7 @@ pub fn (b &Benchmark) step_message_with_label_and_duration(label string, msg str
 			}
 		}
 		if opts.preparation > 0 {
-			return '${label:-5s} [${sprogress}] C: ${f64(opts.preparation.microseconds()) / 1_000.0:6.1F} ms, R: ${timed_line}'
+			return '${label:-5s} [${sprogress}] C: ${f64(opts.preparation.microseconds()) / 1_000.0:7.1F} ms, R: ${timed_line}'
 		}
 		return '${label:-5s} [${sprogress}] ${timed_line}'
 	}

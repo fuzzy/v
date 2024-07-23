@@ -7,7 +7,7 @@ import v.token
 
 fn (mut c Checker) for_c_stmt(mut node ast.ForCStmt) {
 	c.in_for_count++
-	prev_loop_label := c.loop_label
+	prev_loop_labels := c.loop_labels
 	if node.has_init {
 		c.stmt(mut node.init)
 	}
@@ -22,15 +22,15 @@ fn (mut c Checker) for_c_stmt(mut node ast.ForCStmt) {
 		}
 		c.stmt(mut node.inc)
 	}
-	c.check_loop_label(node.label, node.pos)
+	c.check_loop_labels(node.label, node.pos)
 	c.stmts(mut node.stmts)
-	c.loop_label = prev_loop_label
+	c.loop_labels = prev_loop_labels
 	c.in_for_count--
 }
 
 fn (mut c Checker) for_in_stmt(mut node ast.ForInStmt) {
 	c.in_for_count++
-	prev_loop_label := c.loop_label
+	prev_loop_labels := c.loop_labels
 	mut typ := c.expr(mut node.cond)
 	if node.key_var.len > 0 && node.key_var != '_' {
 		c.check_valid_snake_case(node.key_var, 'variable name', node.pos)
@@ -57,6 +57,9 @@ fn (mut c Checker) for_in_stmt(mut node ast.ForInStmt) {
 				node.cond.pos().extend(node.high.pos()))
 		} else if typ_idx !in ast.integer_type_idxs {
 			c.error('range type can only be an integer type', node.cond.pos().extend(node.high.pos()))
+		} else if high_type.has_option_or_result() {
+			c.error('the `high` value in a `for x in low..high {` loop, cannot be Result or Option',
+				node.high.pos())
 		}
 		if high_type in [ast.int_type, ast.int_literal_type] {
 			node.val_type = typ
@@ -256,15 +259,15 @@ fn (mut c Checker) for_in_stmt(mut node ast.ForInStmt) {
 			}
 		}
 	}
-	c.check_loop_label(node.label, node.pos)
+	c.check_loop_labels(node.label, node.pos)
 	c.stmts(mut node.stmts)
-	c.loop_label = prev_loop_label
+	c.loop_labels = prev_loop_labels
 	c.in_for_count--
 }
 
 fn (mut c Checker) for_stmt(mut node ast.ForStmt) {
 	c.in_for_count++
-	prev_loop_label := c.loop_label
+	prev_loop_labels := c.loop_labels
 	c.expected_type = ast.bool_type
 	if node.cond !is ast.EmptyExpr {
 		typ := c.expr(mut node.cond)
@@ -285,9 +288,9 @@ fn (mut c Checker) for_stmt(mut node ast.ForStmt) {
 	}
 	// TODO: update loop var type
 	// how does this work currently?
-	c.check_loop_label(node.label, node.pos)
+	c.check_loop_labels(node.label, node.pos)
 	c.stmts(mut node.stmts)
-	c.loop_label = prev_loop_label
+	c.loop_labels = prev_loop_labels
 	c.in_for_count--
 	if c.smartcast_mut_pos != token.Pos{} {
 		c.smartcast_mut_pos = token.Pos{}

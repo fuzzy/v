@@ -312,7 +312,7 @@ pub fn (t Type) nr_muls() int {
 pub fn (t Type) is_ptr() bool {
 	// any normal pointer, i.e. &Type, &&Type etc;
 	// Note: voidptr, charptr and byteptr are NOT included!
-	return (int(t) >> 16) & 0xff > 0
+	return (int(t) >> 16) & 0xff != 0
 }
 
 // is_pointer returns true if `typ` is any of the builtin pointer types (voidptr, byteptr, charptr)
@@ -331,7 +331,7 @@ pub fn (typ Type) is_voidptr() bool {
 // is_any_kind_of_pointer returns true if t is any type of pointer
 @[inline]
 pub fn (t Type) is_any_kind_of_pointer() bool {
-	return (int(t) >> 16) & 0xff > 0 || (u16(t) & 0xffff) in ast.pointer_type_idxs
+	return (int(t) >> 16) & 0xff != 0 || (u16(t) & 0xffff) in ast.pointer_type_idxs
 }
 
 // set nr_muls on `t` and return it
@@ -398,7 +398,7 @@ pub fn (t Type) clear_option_and_result() Type {
 // return true if `flag` is set on `t`
 @[inline]
 pub fn (t Type) has_flag(flag TypeFlag) bool {
-	return int(t) & (1 << (int(flag) + 24)) > 0
+	return int(t) & (1 << (int(flag) + 24)) != 0
 }
 
 @[inline]
@@ -433,6 +433,7 @@ fn (ts TypeSymbol) dbg_common(mut res []string) {
 	res << 'language: ${ts.language}'
 }
 
+// str returns a string representation of the type.
 pub fn (t Type) str() string {
 	return 'ast.Type(0x${t.hex()} = ${u32(t)})'
 }
@@ -717,7 +718,7 @@ pub fn mktyp(typ Type) Type {
 	}
 }
 
-// returns TypeSymbol kind only if there are no type modifiers
+// type_kind returns the kind of the given type symbol.
 pub fn (t &Table) type_kind(typ Type) Kind {
 	if typ.nr_muls() > 0 || typ.has_option_or_result() {
 		return Kind.placeholder
@@ -776,7 +777,7 @@ pub enum Kind {
 	thread
 }
 
-// str returns the the internal & source name of the type
+// str returns the internal & source name of the type
 pub fn (t TypeSymbol) str() string {
 	return t.name
 }
@@ -924,6 +925,16 @@ pub fn (t &ArrayFixed) is_compatible(t2 ArrayFixed) bool {
 	return t.size == t2.size && t.elem_type == t2.elem_type
 }
 
+pub fn (t &TypeSymbol) is_empty_struct_array() bool {
+	if t.info is ArrayFixed {
+		elem_sym := global_table.final_sym(t.info.elem_type)
+		if elem_sym.info is Struct {
+			return elem_sym.info.fields.len == 0
+		}
+	}
+	return false
+}
+
 pub fn (t &TypeSymbol) is_array_fixed() bool {
 	if t.info is ArrayFixed {
 		return true
@@ -932,6 +943,15 @@ pub fn (t &TypeSymbol) is_array_fixed() bool {
 	} else {
 		return false
 	}
+}
+
+pub fn (t &TypeSymbol) is_c_struct() bool {
+	if t.info is Struct {
+		return t.language == .c
+	} else if t.info is Alias {
+		return global_table.final_sym(t.info.parent_type).is_c_struct()
+	}
+	return false
 }
 
 pub fn (t &TypeSymbol) is_array_fixed_ret() bool {
@@ -1141,7 +1161,7 @@ pub fn (t &Table) type_size(typ Type) (int, int) {
 			size = info.size * elem_size
 			align = elem_align
 		}
-		// TODO hardcoded:
+		// TODO: hardcoded:
 		.map {
 			size = if t.pointer_size == 8 { 120 } else { 80 }
 			align = t.pointer_size
@@ -1329,7 +1349,7 @@ pub fn (t &Table) type_to_str_using_aliases(typ Type, import_aliases map[string]
 			}
 		}
 		.chan {
-			// TODO currently the `chan` struct in builtin is not considered a struct but a chan
+			// TODO: currently the `chan` struct in builtin is not considered a struct but a chan
 			if sym.mod != 'builtin' && sym.name != 'chan' {
 				info := sym.info as Chan
 				mut elem_type := info.elem_type
@@ -1349,7 +1369,7 @@ pub fn (t &Table) type_to_str_using_aliases(typ Type, import_aliases map[string]
 			} else {
 				if res.starts_with('fn (') {
 					// fn foo ()
-					has_names := info.func.params.any(it.name.len > 0)
+					has_names := info.func.params.any(it.name != '')
 					res = t.fn_signature_using_aliases(info.func, import_aliases,
 						type_only: !has_names
 					)
@@ -1467,46 +1487,42 @@ pub fn (t &Table) type_to_str_using_aliases(typ Type, import_aliases map[string]
 	return res
 }
 
-fn (t Table) shorten_user_defined_typenames(originalname string, import_aliases map[string]string) string {
-	mut res := originalname
-	if t.cmod_prefix.len > 0 && res.starts_with(t.cmod_prefix) {
-		// cur_mod.Type => Type
-		res = res.replace_once(t.cmod_prefix, '')
-	} else if res in import_aliases {
-		res = import_aliases[res]
-	} else {
-		// FIXME: clean this case and remove the following if
-		// because it is an hack to format well the type when
-		// there is a []mod.name
-		if res.contains('[]') {
-			idx := res.index('.') or { -1 }
-			return res[idx + 1..]
+fn (t Table) shorten_user_defined_typenames(original_name string, import_aliases map[string]string) string {
+	if alias := import_aliases[original_name] {
+		return alias
+	}
+	mut mod, mut typ := original_name.rsplit_once('.') or { return original_name }
+	if !mod.contains('[') {
+		if !t.is_fmt {
+			mod = mod.all_after_last('.')
 		}
-		// types defined by the user
-		// mod.submod.submod2.Type => submod2.Type
-		mut parts := res.split('.')
-		if parts.len > 1 {
-			if parts[..parts.len - 1].all(!it.contains('[')) {
-				ind := parts.len - 2
-				if t.is_fmt {
-					// Rejoin the module parts for correct usage of aliases
-					parts[ind] = parts[..ind + 1].join('.')
-				}
-				if parts[ind] in import_aliases {
-					parts[ind] = import_aliases[parts[ind]]
-				}
-
-				res = parts[ind..].join('.')
+		if alias := import_aliases[mod] {
+			mod = alias
+		} else if t.cmod_prefix != '' {
+			if alias := import_aliases[t.cmod_prefix + mod] {
+				mod = alias
+			} else {
+				// cur_mod.Type => Type
+				return original_name.all_after(t.cmod_prefix)
 			}
-		} else {
-			res = parts[0]
 		}
 	}
-	return res
+	// E.g.: []mod.Type => []Type; []mod.submod.Type => []submod.Type;
+	// imported_mod.Type[mod.Result[[]mod.Token]] => imported_mod.Type[Result[[]Token]]
+	if original_name.contains('[]') {
+		if lhs, typ_after_lsbr := original_name.split_once('[') {
+			if mod_, typ_before_lsbr := lhs.rsplit_once('.') {
+				mod = mod_
+				typ = '${typ_before_lsbr}[${typ_after_lsbr}'
+			}
+		}
+	}
+	return '${mod}.${typ}'
 }
 
 @[minify]
 pub struct FnSignatureOpts {
+pub:
 	skip_receiver bool
 	type_only     bool
 }
@@ -1519,7 +1535,7 @@ pub fn (t &Table) fn_signature_using_aliases(func &Fn, import_aliases map[string
 	mut sb := strings.new_builder(20)
 	if !opts.skip_receiver {
 		sb.write_string('fn ')
-		// TODO write receiver
+		// TODO: write receiver
 	}
 	if !opts.type_only {
 		sb.write_string(func.name)
@@ -1712,6 +1728,9 @@ pub fn (t &TypeSymbol) str_method_info() (bool, bool, int) {
 		if nr_args > 0 {
 			expects_ptr = sym_str_method.params[0].typ.is_ptr()
 		}
+	} else {
+		// C Struct which does not implement str() are passed as pointer to handle incomplete type
+		expects_ptr = t.is_c_struct()
 	}
 	return has_str_method, expects_ptr, nr_args
 }

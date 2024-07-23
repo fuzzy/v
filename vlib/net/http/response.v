@@ -85,7 +85,7 @@ pub fn (r Response) cookies() []Cookie {
 	return cookies
 }
 
-// status parses the status_code into a Status struct
+// status parses the status_code and returns a corresponding enum field of Status
 pub fn (r Response) status() Status {
 	return status_from_int(r.status_code)
 }
@@ -117,6 +117,7 @@ pub fn (mut r Response) set_version(v Version) {
 }
 
 pub struct ResponseConfig {
+pub:
 	version Version = .v1_1
 	status  Status  = .ok
 	header  Header
@@ -130,7 +131,7 @@ pub fn new_response(conf ResponseConfig) Response {
 		body: conf.body
 		header: conf.header
 	}
-	if resp.body.len > 0 && !resp.header.contains(.content_length) {
+	if resp.body != '' && !resp.header.contains(.content_length) {
 		resp.header.add(.content_length, resp.body.len.str())
 	}
 	resp.set_status(conf.status)

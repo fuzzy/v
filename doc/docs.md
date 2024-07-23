@@ -60,7 +60,7 @@ by using any of the following commands in a terminal:
 * [Running a project folder](#running-a-project-folder-with-several-files)
 * [Comments](#comments)
 * [Functions](#functions)
-    * [Hoistings](#hoistings)
+    * [Hoisting](#hoisting)
     * [Returning multiple values](#returning-multiple-values)
 * [Symbol visibility](#symbol-visibility)
 * [Variables](#variables)
@@ -125,7 +125,9 @@ by using any of the following commands in a terminal:
     * [Dumping expressions at runtime](#dumping-expressions-at-runtime)
 * [Modules](#modules)
     * [Create modules](#create-modules)
+    * [Special considerations for project folders](#special-considerations-for-project-folders)
     * [init functions](#init-functions)
+    * [cleanup functions](#cleanup-functions)
 
 </td></tr>
 <tr><td width=33% valign=top>
@@ -178,6 +180,8 @@ by using any of the following commands in a terminal:
         * [Compile time types](#compile-time-types)
         * [Environment specific files](#environment-specific-files)
 	* [Debugger](#debugger)
+ 		* [Call stack](#call-stack)
+   		* [Trace](#trace)
     * [Memory-unsafe code](#memory-unsafe-code)
     * [Structs with reference fields](#structs-with-reference-fields)
     * [sizeof and __offsetof](#sizeof-and-__offsetof)
@@ -336,7 +340,7 @@ Again, the type comes after the argument's name.
 Just like in Go and C, functions cannot be overloaded.
 This simplifies the code and improves maintainability and readability.
 
-### Hoistings
+### Hoisting
 
 Functions can be used before their declaration:
 `add` and `sub` are declared after `main`, but can still be called from `main`.
@@ -1265,37 +1269,49 @@ does not alter the parent:
 
 ```v
 mut a := [0, 1, 2, 3, 4, 5]
-mut b := a[2..4]
-b[0] = 7 // `b[0]` is referring to `a[2]`
-println(a) // `[0, 1, 7, 3, 4, 5]`
+
+// Create a slice, that reuses the *same memory* as the parent array
+// initially, without doing a new allocation:
+mut b := unsafe { a[2..4] } // the contents of `b`, reuses the memory, used by the contents of `a`.
+
+b[0] = 7 // Note that `b[0]` and `a[2]` refer to *the same element* in memory.
+println(a) // `[0, 1, 7, 3, 4, 5]` - changing `b[0]` above, changed `a[2]` too.
+
+// the content of `b` will get reallocated, to have room for the `9` element:
 b << 9
-// `b` has been reallocated and is now independent from `a`
-println(a) // `[0, 1, 7, 3, 4, 5]` - no change
-println(b) // `[7, 3, 9]`
+// The content of `b`, is now reallocated, and fully independent from the content of `a`.
+
+println(a) // `[0, 1, 7, 3, 4, 5]` - no change, since the content of `b` was reallocated,
+// to a larger block, before the appending.
+
+println(b) // `[7, 3, 9]` - the contents of `b`, after the reallocation, and appending of the `9`.
 ```
 
-Appending to the parent array may or may not make it independent from its child slices.
-The behaviour depends on the parent's capacity and is predictable:
+Appending to the parent array, may or may not make it independent from its child slices.
+The behaviour depends on the *parent's capacity* and is predictable:
 
 ```v
 mut a := []int{len: 5, cap: 6, init: 2}
-mut b := unsafe { a[1..4] }
+mut b := unsafe { a[1..4] } // the contents of `b` uses part of the same memory, that is used by `a` too
+
 a << 3
-// no reallocation - fits in `cap`
-b[2] = 13 // `a[3]` is modified
+// still no reallocation of `a`, since `a.len` still fits in `a.cap`
+b[2] = 13 // `a[3]` is modified, through the slice `b`.
+
 a << 4
-// a has been reallocated and is now independent from `b` (`cap` was exceeded)
+// the content of `a` has been reallocated now, and is independent from `b` (`cap` was exceeded by `len`)
 b[1] = 3 // no change in `a`
+
 println(a) // `[2, 2, 2, 13, 2, 3, 4]`
 println(b) // `[2, 3, 13]`
 ```
 
-You can call .clone() on the slice, if you do want to have an independent copy right away:
+You can call .clone() on the slice, if you *do* want to have an independent copy right away:
 
 ```v
 mut a := [0, 1, 2, 3, 4, 5]
 mut b := a[2..4].clone()
-b[0] = 7 // Note: `b[0]` is NOT referring to `a[2]`, as it would have been, without the .clone()
+b[0] = 7 // Note: `b[0]` is NOT referring to `a[2]`, as it would have been, without the `.clone()`
 println(a) // [0, 1, 2, 3, 4, 5]
 println(b) // [7, 3]
 ```
@@ -1588,7 +1604,7 @@ fn main() {
 		month: 12
 		day: 25
 	}
-	println(time.new_time(my_time).utc_string())
+	println(time.new(my_time).utc_string())
 	println('Century: ${my_time.century()}')
 }
 ```
@@ -2062,7 +2078,7 @@ from `low` up to *but not including* `high`.
 > This exclusive range notation and zero-based indexing follow principles of
 logical consistency and error reduction. As Edsger W. Dijkstra outlines in
 'Why Numbering Should Start at Zero'
-([EWD831](https://www.cs.utexas.edu/users/EWD/transcriptions/EWD08xx/EWD831.html)), 
+([EWD831](https://www.cs.utexas.edu/users/EWD/transcriptions/EWD08xx/EWD831.html)),
 zero-based indexing aligns the index with the preceding elements in a sequence,
 simplifying handling and minimizing errors, especially with adjacent subsequences.
 This logical and efficient approach shapes our language design, emphasizing clarity
@@ -2467,6 +2483,7 @@ new_button(ButtonConfig{text:'Click me', width:100})
 
 This only works for functions that take a struct for the last argument.
 
+> [!NOTE]
 > Note the `[params]` tag is used to tell V, that the trailing struct parameter
 > can be omitted *entirely*, so that you can write `button := new_button()`.
 > Without it, you have to specify *at least* one of the field names, even if it
@@ -2672,7 +2689,7 @@ Button{
 ```
 
 Unlike inheritance, you cannot type cast between structs and embedded structs
-(the embedding struct can also has its own fields, and it can also embed multiple structs).
+(the embedding struct can also have its own fields, and it can also embed multiple structs).
 
 If you need to access embedded structs directly, use an explicit reference like `button.Size`.
 
@@ -3266,10 +3283,23 @@ fn main() {
 * You can create modules anywhere.
 * All modules are compiled statically into a single executable.
 
+### Special considerations for project folders
+
+For the top level project folder (the one, compiled with `v .`), and *only*
+that folder, you can have several .v files, that may be mentioning different modules
+with `module main`, `module abc` etc
+
+This is to ease the prototyping workflow in that folder:
+- you can start developing some new project with a single .v file
+- split functionality as necessary to different .v files in the same folder
+- when that makes logical sense to be further organised, put them into their own directory module.
+
+Note that in ordinary modules, all .v files must start with `module name_of_folder`.
+
 ### `init` functions
 
 If you want a module to automatically call some setup/initialization code when it is imported,
-you can use a module `init` function:
+you can define a module `init` function:
 
 ```v
 fn init() {
@@ -3277,8 +3307,24 @@ fn init() {
 }
 ```
 
-The `init` function cannot be public - it will be called automatically. This feature is
-particularly useful for initializing a C library.
+The `init` function cannot be public - it will be called automatically by V, *just once*, no matter
+how many times the module was imported in your program. This feature is particularly useful for
+initializing a C library.
+
+### `cleanup` functions
+
+If you want a module to automatically call some cleanup/deinitialization code, when your program
+ends, you can define a module `cleanup` function:
+
+```v
+fn cleanup() {
+	// your deinitialisation code here ...
+}
+```
+
+Just like the `init` function, the `cleanup` function for a module cannot be public - it will be
+called automatically, when your program ends, once per module, even if the module was imported
+transitively by other modules several times, in the reverse order of the init calls.
 
 ## Type Declarations
 
@@ -3389,6 +3435,31 @@ three
 one
 two
 three
+one
+```
+
+Enums can be created from string or integer value and converted into string
+
+```v
+enum Cycle {
+	one
+	two   = 2
+	three
+}
+
+// Create enum from value
+println(Cycle.from(10) or { Cycle.three })
+println(Cycle.from('two')!)
+
+// Convert an enum value to a string
+println(Cycle.one.str())
+```
+
+Output:
+
+```
+three
+two
 one
 ```
 
@@ -3914,6 +3985,11 @@ fn main() {
 	println(user.name) // "Charles"
 
 	user2 := repo.find_user_by_id2(10) or { return }
+
+	// To create an Option var directly:
+	my_optional_int := ?int(none)
+	my_optional_string := ?string(none)
+	my_optional_user := ?User(none)
 }
 ```
 
@@ -4903,7 +4979,7 @@ struct MyStruct {
 }
 
 fn main() {
-	m := MyStruct{}
+	mut m := MyStruct{}
 	mut r := RefStruct{
 		r: &m
 	}
@@ -5006,7 +5082,7 @@ fn use_stack() {
 }
 
 fn main() {
-	m := MyStruct{}
+	mut m := MyStruct{}
 	mut r := RefStruct{
 		r: &m
 	}
@@ -5181,7 +5257,6 @@ To generate documentation use vdoc, for example `v doc net.http`.
 Comments spanning multiple lines are merged together using spaces, unless
 
 - the line is empty
-- the line ends with a `.` (end of sentence)
 - the line is purely of at least 3 of `-`, `=`, `_`, `*`, `~` (horizontal rule)
 - the line starts with at least one `#` followed by a space (header)
 - the line starts and ends with a `|` (table)
@@ -5452,7 +5527,7 @@ An attribute is a compiler instruction specified inside `[]` right before a
 function/struct/enum declaration and applies only to the following declaration.
 
 ```v
-// [flag] enables Enum types to be used as bitfields
+// @[flag] enables Enum types to be used as bitfields
 
 @[flag]
 enum BitField {
@@ -5466,7 +5541,7 @@ fn main() {
 	assert 2 == int(BitField.write)
 	mut bf := BitField.read
 	assert bf.has(.read | .other) // test if *at least one* of the flags is set
-	assert !bf.all(.read | .other) // test if *all* of the flags is set
+	assert !bf.all(.read | .other) // test if *all* of the flags are set
 	bf.set(.write | .other)
 	assert bf.has(.read | .write | .other)
 	assert bf.all(.read | .write | .other)
@@ -5474,6 +5549,24 @@ fn main() {
 	assert bf == BitField.read | .write
 	assert bf.all(.read | .write)
 	assert !bf.has(.other)
+	empty := BitField.zero()
+	assert empty.is_empty()
+	assert !empty.has(.read)
+	assert !empty.has(.write)
+	assert !empty.has(.other)
+	mut full := empty
+	full.set_all()
+	assert int(full) == 7 // 0x01 + 0x02 + 0x04
+	assert full == .read | .write | .other
+	mut v := full
+	v.clear(.read | .other)
+	assert v == .write
+	v.clear_all()
+	assert v == empty
+	assert BitField.read == BitField.from('read')!
+	assert BitField.other == BitField.from('other')!
+	assert BitField.write == BitField.from(2)!
+	assert BitField.zero() == BitField.from('')!
 }
 ```
 
@@ -5519,7 +5612,7 @@ fn legacy_function() {}
 fn legacy_function2() {}
 ```
 
-```v nofmt
+```v globals
 // This function's calls will be inlined.
 @[inline]
 fn inlined_function() {
@@ -5547,21 +5640,6 @@ fn forever() {
 struct Window {
 }
 
-// V will not generate this function and all its calls if the provided flag is false.
-// To use a flag, use `v -d flag`
-@[if debug]
-fn foo() {
-}
-
-fn bar() {
-	foo() // will not be called if `-d debug` is not passed
-}
-
-// The memory pointed to by the pointer arguments of this function will not be
-// freed by the garbage collector (if in use) before the function returns
-@[keep_args_alive]
-fn C.my_external_function(voidptr, int, voidptr) int
-
 // Calls to following function must be in unsafe{} blocks.
 // Note that the code in the body of `risky_business()` will still be
 // checked, unless you also wrap it in `unsafe {}` blocks.
@@ -5584,22 +5662,52 @@ fn risky_business() {
 
 // V's autofree engine will not take care of memory management in this function.
 // You will have the responsibility to free memory manually yourself in it.
+// Note: it is NOT related to the garbage collector. It will only make the
+// -autofree mechanism, ignore the body of that function.
 @[manualfree]
 fn custom_allocations() {
 }
 
-// For C interop only, tells V that the following struct is defined with `typedef struct` in C
-@[typedef]
-pub struct C.Foo {
+// The memory pointed to by the pointer arguments of this function will not be
+// freed by the garbage collector (if in use) before the function returns
+// For C interop only.
+@[keep_args_alive]
+fn C.my_external_function(voidptr, int, voidptr) int
+
+// A @[weak] tag tells the C compiler, that the next declaration will be weak, i.e. when linking,
+// if there is another declaration of a symbol with the same name (a 'strong' one), it should be
+// used instead, *without linker errors about duplicate symbols*.
+// For C interop only.
+
+@[weak]
+__global abc = u64(1)
+
+// Tell V, that the following global was defined on the C side,
+// thus V will not initialise it, but will just give you access to it.
+// For C interop only.
+
+@[c_extern]
+__global my_instance C.my_struct
+struct C.my_struct {
+	a int
+	b f64
 }
+
+// Tell V that the following struct is defined with `typedef struct` in C.
+// For C interop only.
+@[typedef]
+pub struct C.Foo {}
 
 // Used to add a custom calling convention to a function, available calling convention: stdcall, fastcall and cdecl.
 // This list also applies for type aliases (see below).
-@[callconv: "stdcall"]
+// For C interop only.
+@[callconv: 'stdcall']
 fn C.DefWindowProc(hwnd int, msg int, lparam int, wparam int)
 
 // Used to add a custom calling convention to a function type aliases.
-@[callconv: "fastcall"]
+// For C interop only.
+
+@[callconv: 'fastcall']
 type FastFn = fn (int) bool
 
 // Windows only:
@@ -5615,6 +5723,45 @@ fn main() {
 ```
 
 ## Conditional compilation
+
+The goal of this feature, is to tell V to *not compile* a function, and all its calls, in the final
+executable, if a provided custom flag is not passed.
+
+V will still type check the function and all its calls, *even* if they will not be present in the
+final executable, due to the passed -d flags.
+
+In order to see it in action, run the following example with `v run example.v` once,
+and then a second time with `v -d trace_logs example.v`:
+```v
+@[if trace_logs ?]
+fn elog(s string) {
+	eprintln(s)
+}
+
+fn main() {
+	elog('some expression: ${2 + 2}') // such calls will not be done *at all*, if `-d trace_logs` is not passed
+	println('hi')
+	elog('finish')
+}
+```
+
+Conditional compilation, based on custom flags, can also be used to produce slightly different
+executables, which share the majority of the same code, but where some of the logic, is needed
+only some of the time, for example a network server/client program can be written like so:
+```v ignore
+fn act_as_client() { ... }
+fn act_as_server() { ... }
+fn main() {
+	$if as_client ? {
+		act_as_client()
+	}
+	$if as_server ? {
+		act_as_server()
+	}
+}
+```
+To generate a `client.exe` executable do: `v -d as_client -o client.exe .`
+To generate a `server.exe` executable do: `v -d as_server -o server.exe .`
 
 ### Compile time pseudo variables
 
@@ -5638,6 +5785,8 @@ that are substituted at compile time:
   recompiled on a different commit (after local modifications, or after
   using git bisect etc).
 - `@VMOD_FILE` => replaced with the contents of the nearest v.mod file (as a string).
+- `@VMODHASH` => is replaced by the shortened commit hash, derived from the .git directory
+  next to the nearest v.mod file (as a string).
 - `@VMODROOT` => will be substituted with the *folder*,
   where the nearest v.mod file is (as a string).
 
@@ -5662,7 +5811,7 @@ print($embed_file(@FILE).to_string())
 
 > [!NOTE]
 > you can have arbitrary source code in the file, without problems, since the full file
-> will be embeded into the executable, produced by compiling it. Also note that printing
+> will be embedded into the executable, produced by compiling it. Also note that printing
 > is done with `print` and not `println`, to not add another new line, missing in the
 > source code.
 
@@ -5701,10 +5850,10 @@ fn main() {
 
 You can read [Enum](#enums) values and their attributes.
 
-```V
+```v
 enum Color {
-	red @[RED] // first attribute
-	blue @[BLUE] // second attribute
+	red  @[RED] // first attribute
+	blue  @[BLUE] // second attribute
 }
 
 fn main() {
@@ -5725,7 +5874,7 @@ fn main() {
 
 You can read [Struct](#structs) attributes.
 
-```V
+```v
 @[COLOR]
 struct Foo {
 	a int
@@ -5750,7 +5899,7 @@ fn main() {
 
 You can read variant types from [Sum type](#sum-types).
 
-```V
+```v
 type MySum = int | string
 
 fn main() {
@@ -5772,7 +5921,7 @@ fn main() {
 
 You can retrieve information about struct methods.
 
-```V
+```v
 struct Foo {
 }
 
@@ -5783,7 +5932,6 @@ fn (f Foo) test() int {
 fn (f Foo) test2() string {
 	return 'foo'
 }
-
 
 fn main() {
 	foo := Foo{}
@@ -5860,10 +6008,14 @@ Full list of builtin options:
 | OS                             | Compilers        | Platforms                     | Other                                         |
 |--------------------------------|------------------|-------------------------------|-----------------------------------------------|
 | `windows`, `linux`, `macos`    | `gcc`, `tinyc`   | `amd64`, `arm64`, `aarch64`   | `debug`, `prod`, `test`                       |
-| `mac`, `darwin`, `ios`,        | `clang`, `mingw` | `i386`, `arm32`               | `js`, `glibc`, `prealloc`                     |
-| `android`, `mach`, `dragonfly` | `msvc`           | `x64`, `x32`                  | `no_bounds_checking`, `freestanding`          |
-| `gnu`, `hpux`, `haiku`, `qnx`  | `cplusplus`      | `little_endian`, `big_endian` | `no_segfault_handler`, `no_backtrace`         |
-| `solaris`, `termux`            |                  |                               | `no_main`, 'fast_math'                        |
+| `darwin`, `ios`, `bsd`         | `clang`, `mingw` | `i386`, `arm32`               | `js`, `glibc`, `prealloc`                     |
+| `freebsd`, `openbsd`, `netbsd` | `msvc`           | `rv64`, `rv32`                | `no_bounds_checking`, `freestanding`          |
+| `android`, `mach`, `dragonfly` | `cplusplus`      | `x64`, `x32`                  | `no_segfault_handler`, `no_backtrace`         |
+| `gnu`, `hpux`, `haiku`, `qnx`  |                  | `little_endian`, `big_endian` | `no_main`, `fast_math`, `apk`, `threads`      |
+| `solaris`, `termux`            |                  |                               | `js_node`, `js_browser`, `js_freestanding`    |
+| `serenity`, `vinix`, `plan9`   |                  |                               | `interpreter`, `es5`, `profile`, `wasm32`     |
+|                                |                  |                               | `wasm32_emscripten`, `wasm32_wasi`            |
+|                                |                  |                               | `native`, `autofree`                          |
 
 #### `$embed_file`
 
@@ -5971,6 +6123,67 @@ fn main() {
 V can bring in values at compile time from environment variables.
 `$env('ENV_VAR')` can also be used in top-level `#flag` and `#include` statements:
 `#flag linux -I $env('JAVA_HOME')/include`.
+
+#### `$d`
+
+V can bring in values at compile time from `-d ident=value` flag defines, passed on
+the command line to the compiler. You can also pass `-d ident`, which will have the
+same meaning as passing `-d ident=true`.
+
+To get the value in your code, use: `$d('ident', default)`, where `default`
+can be `false` for booleans, `0` or `123` for i64 numbers, `0.0` or `113.0`
+for f64 numbers, `'a string'` for strings.
+
+When a flag is not provided via the command line, `$d()` will return the `default`
+value provided as the *second* argument.
+
+```v
+module main
+
+const my_i64 = $d('my_i64', 1024)
+
+fn main() {
+	compile_time_value := $d('my_string', 'V')
+	println(compile_time_value)
+	println(my_i64)
+}
+```
+
+Running the above with `v run .` will output:
+```
+V
+1024
+```
+
+Running the above with `v -d my_i64=4096 -d my_string="V rocks" run .` will output:
+```
+V rocks
+4096
+```
+
+Here is an example of how to use the default values, which have to be *pure* literals:
+```v
+fn main() {
+	val_str := $d('id_str', 'value') // can be changed by providing `-d id_str="my id"`
+	val_f64 := $d('id_f64', 42.0) // can be changed by providing `-d id_f64=84.0`
+	val_i64 := $d('id_i64', 56) // can be changed by providing `-d id_i64=123`
+	val_bool := $d('id_bool', false) // can be changed by providing `-d id_bool=true`
+	val_char := $d('id_char', `f`) // can be changed by providing `-d id_char=v`
+	println(val_str)
+	println(val_f64)
+	println(val_i64)
+	println(val_bool)
+	println(rune(val_char))
+}
+```
+
+`$d('ident','value')` can also be used in top-level statements like `#flag` and `#include`:
+`#flag linux -I $d('my_include','/usr')/include`. The default value for `$d` when used in these
+statements should be literal `string`s.
+
+`$d('ident', false)` can also be used inside `$if $d('ident', false) {` statements,
+granting you the ability to selectively turn on/off certain sections of code, at compile
+time, without modifying your source code, or keeping different versions of it.
 
 #### `$compile_error` and `$compile_warn`
 
@@ -6093,28 +6306,28 @@ See also [Cross Compilation](#cross-compilation).
 
 ## Debugger
 
-To use the native *V debugger*, add the `$dbg` statement to your source, where you 
+To use the native *V debugger*, add the `$dbg` statement to your source, where you
 want the debugger to be invoked.
 
-```V
+```v
 fn main() {
 	a := 1
-	$dbg
+	$dbg;
 }
 ```
 
-Running this V code, you will get the debugger REPL break when the execution 
+Running this V code, you will get the debugger REPL break when the execution
 reaches the `$dbg` statement.
 
 ```
 $ v run example.v
 Break on [main] main in example.v:3
-example.v:3 vdbg> 
+example.v:3 vdbg>
 ```
 
 At this point, execution is halted, and the debugger is now available.
 
-To see the available commands, type 
+To see the available commands, type
 ?, h or help. (Completion for commands works - Non-Windows only)
 
 ```
@@ -6180,7 +6393,7 @@ example.v:3 vdbg> l
 0005  }
 ```
 
-The default is read 3 lines before and 3 lines after, but you can 
+The default is read 3 lines before and 3 lines after, but you can
 pass a parameter to the command to read more lines, like `l 5`.
 
 Now, lets watch the variable changing on this loop.
@@ -6200,22 +6413,97 @@ i = 1 (int)
 
 `i` and it's value is automatically printed, because it is in the watch list.
 
-To repeat the last command issued, in this case the `c` command, 
+To repeat the last command issued, in this case the `c` command,
 just hit the *enter* key.
 
 ```
-example.v:3 vdbg> 
+example.v:3 vdbg>
 Break on [main] main in example.v:3
 i = 2 (int)
-example.v:3 vdbg> 
+example.v:3 vdbg>
 Break on [main] main in example.v:3
 i = 3 (int)
 example.v:3 vdbg>
 ```
 
 You can also see memory usage with `mem` or `memory` command, and
-check if the current context is an anon function (`anon?`), a method (`method?`) 
-or a generic method (`generic?`).
+check if the current context is an anon function (`anon?`), a method (`method?`)
+or a generic method (`generic?`) and clear the terminal window (`clear`).
+
+## Call stack
+
+You can also show the current call stack with `v.debug`.
+
+To enable this feature, add the `-d callstack` switch when building or running
+your code:
+
+```v
+import v.debug
+
+fn test(i int) {
+	if i > 9 {
+		debug.dump_callstack()
+	}
+}
+
+fn do_something() {
+	for i := 0; i <= 10; i++ {
+		test(i)
+	}
+}
+
+fn main() {
+	do_something()
+}
+```
+
+```
+$ v -d callstack run example.v
+Backtrace:
+--------------------------------------------------
+example.v:16   | > main.main
+example.v:11   |  > main.do_something
+example.v:5    |   > main.test
+--------------------------------------------------
+```
+
+## Trace
+
+Another feature of `v.debug` is the possibility to add hook functions
+before and after each function call.
+
+To enable this feature, add the `-d trace` switch when building or running
+your code:
+
+```v
+import v.debug
+
+fn main() {
+	hook1 := debug.add_before_call(fn (fn_name string) {
+		println('> before ${fn_name}')
+	})
+	hook2 := debug.add_after_call(fn (fn_name string) {
+		println('> after ${fn_name}')
+	})
+	anon := fn () {
+		println('call')
+	}
+	anon()
+
+	// optionally you can remove the hooks:
+	debug.remove_before_call(hook1)
+	debug.remove_after_call(hook2)
+	anon()
+}
+```
+
+```
+$ v -d trace run example.v
+> before anon
+call
+> after anon
+call
+```
 
 ## Memory-unsafe code
 
@@ -6797,7 +7085,7 @@ v -os linux .
 For Ubuntu/Debian based distributions:
 
 ```shell
-sudo apt-get install gcc-mingw-w64-x86-64
+sudo apt install gcc-mingw-w64-x86-64
 ```
 
 For Arch based distributions:
@@ -6997,7 +7285,7 @@ and `-cflags` settings, rather than including them in the build command each tim
 
 ### #pkgconfig
 
-Add `#pkgconfig` directive is used to tell the compiler which modules should be used for compiling
+Add `#pkgconfig` directives to tell the compiler which modules should be used for compiling
 and linking using the pkg-config files provided by the respective dependencies.
 
 As long as backticks can't be used in `#flag` and spawning processes is not desirable for security
@@ -7155,7 +7443,7 @@ By default all V functions have the following naming scheme in C: `[module name]
 
 For example, `fn foo() {}` in module `bar` will result in `bar__foo()`.
 
-To use a custom export name, use the `[export]` attribute:
+To use a custom export name, use the `@[export]` attribute:
 
 ```
 @[export: 'my_custom_c_name']
@@ -7395,10 +7683,10 @@ sh('ls')
 
 Now you can either compile this like a normal V program and get an executable you can deploy and run
 anywhere:
-`v deploy.vsh && ./deploy`
+`v -skip-running deploy.vsh && ./deploy`
 
-Or just run it more like a traditional Bash script:
-`v run deploy.vsh`
+Or run it like a traditional Bash script:
+`v run deploy.vsh` (or simply just `v deploy.vsh`)
 
 On Unix-like platforms, the file can be run directly after making it executable using `chmod +x`:
 `./deploy.vsh`
@@ -7508,4 +7796,5 @@ Assignment Operators
 +=   -=   *=   /=   %=
 &=   |=   ^=
 >>=  <<=  >>>=
+&&= ||=
 ```

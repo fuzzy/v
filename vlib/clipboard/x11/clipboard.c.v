@@ -14,10 +14,14 @@ $if freebsd {
 }
 #flag -lX11
 
-#include <X11/Xlib.h> # Please install a package with the X11 development headers, for example: `apt-get install libx11-dev`
+#include <X11/Xlib.h> # Please install a package with the X11 development headers, for example: `apt install libx11-dev`
 // X11
+
 @[typedef]
-pub struct C.Display {
+pub struct C.Display {}
+
+fn (d &C.Display) str() string {
+	return 'C.Display{}'
 }
 
 type Window = u64
@@ -37,13 +41,15 @@ fn C.XSetSelectionOwner(d &C.Display, a Atom, w Window, time int)
 
 fn C.XGetSelectionOwner(d &C.Display, a Atom) Window
 
-fn C.XChangeProperty(d &C.Display, requestor Window, property Atom, typ Atom, format int, mode int, data voidptr, nelements int) int
+fn C.XChangeProperty(d &C.Display, requestor Window, property Atom, typ Atom, format int, mode int, data voidptr,
+	nelements int) int
 
-fn C.XSendEvent(d &C.Display, requestor Window, propogate int, mask i64, event &C.XEvent)
+fn C.XSendEvent(d &C.Display, requestor Window, propagate int, mask i64, event &C.XEvent)
 
 fn C.XInternAtom(d &C.Display, typ &u8, only_if_exists int) Atom
 
-fn C.XCreateSimpleWindow(d &C.Display, root Window, x int, y int, width u32, height u32, border_width u32, border u64, background u64) Window
+fn C.XCreateSimpleWindow(d &C.Display, root Window, x int, y int, width u32, height u32, border_width u32,
+	border u64, background u64) Window
 
 fn C.XOpenDisplay(name &u8) &C.Display
 
@@ -51,7 +57,8 @@ fn C.XConvertSelection(d &C.Display, selection Atom, target Atom, property Atom,
 
 fn C.XSync(d &C.Display, discard int) int
 
-fn C.XGetWindowProperty(d &C.Display, w Window, property Atom, offset i64, length i64, delete int, req_type Atom, actual_type_return &Atom, actual_format_return &int, nitems &u64, bytes_after_return &u64, prop_return &&u8) int
+fn C.XGetWindowProperty(d &C.Display, w Window, property Atom, offset i64, length i64, delete int, req_type Atom,
+	actual_type_return &Atom, actual_format_return &int, nitems &u64, bytes_after_return &u64, prop_return &&u8) int
 
 fn C.XDeleteProperty(d &C.Display, w Window, property Atom) int
 
@@ -203,7 +210,7 @@ pub fn (cb &Clipboard) check_availability() bool {
 pub fn (mut cb Clipboard) free() {
 	C.XDestroyWindow(cb.display, cb.window)
 	cb.window = Window(0)
-	// FIX ME: program hangs when closing display
+	// FIXME: program hangs when closing display
 	// XCloseDisplay(cb.display)
 }
 

@@ -220,7 +220,13 @@ pub fn (mut t Transformer) stmt(mut node ast.Stmt) ast.Stmt {
 				stmt = t.stmt(mut stmt)
 			}
 		}
-		ast.EnumDecl {}
+		ast.EnumDecl {
+			for mut field in node.fields {
+				if field.has_expr {
+					field.expr = t.expr(mut field.expr)
+				}
+			}
+		}
 		ast.ExprStmt {
 			// TODO: check if this can be handled in `t.expr`
 			node.expr = match mut node.expr {
@@ -236,7 +242,9 @@ pub fn (mut t Transformer) stmt(mut node ast.Stmt) ast.Stmt {
 			}
 		}
 		ast.FnDecl {
-			t.fn_decl(mut node)
+			if t.pref.trace_calls {
+				t.fn_decl_trace_calls(mut node)
+			}
 			t.index.indent(true)
 			for mut stmt in node.stmts {
 				stmt = t.stmt(mut stmt)
@@ -468,7 +476,7 @@ pub fn (mut t Transformer) expr_stmt_match_expr(mut node ast.MatchExpr) ast.Expr
 }
 
 pub fn (mut t Transformer) for_c_stmt(mut node ast.ForCStmt) ast.Stmt {
-	// TODO we do not optimise array access for multi init
+	// TODO: we do not optimise array access for multi init
 	// for a,b := 0,1; a < 10; a,b = a+b, a {...}
 
 	if node.has_init && !node.is_multi {
@@ -717,7 +725,7 @@ fn (mut t Transformer) trans_const_value_to_literal(mut expr ast.Expr) {
 		if _ := expr_.scope.find_var(expr_.name) {
 			return
 		}
-		if mut obj := t.table.global_scope.find_const(expr_.mod + '.' + expr_.name) {
+		if mut obj := t.table.global_scope.find_const(expr_.full_name()) {
 			if mut obj.expr is ast.BoolLiteral {
 				expr = obj.expr
 			} else if mut obj.expr is ast.IntegerLiteral {
@@ -1101,43 +1109,42 @@ pub fn (mut t Transformer) sql_expr(mut node ast.SqlExpr) ast.Expr {
 	return node
 }
 
-// fn_decl mutates `node`.
-// if `pref.trace_calls` is true ast Nodes for `eprintln(...)` is prepended to the `FnDecl`'s
-// stmts list to let the gen backend generate the target specific code for the print.
-pub fn (mut t Transformer) fn_decl(mut node ast.FnDecl) {
-	if t.pref.trace_calls {
-		if node.no_body {
-			// Skip `C.fn()` calls
-			return
-		}
-		if node.name.starts_with('v.trace_calls.') {
-			// do not instrument the tracing functions, to avoid infinite regress
-			return
-		}
-		fname := if node.is_method {
-			receiver_name := global_table.type_to_str(node.receiver.typ)
-			'${node.mod} ${receiver_name}.${node.name}/${node.params.len}'
-		} else {
-			'${node.mod} ${node.name}/${node.params.len}'
-		}
-
-		expr_stmt := ast.ExprStmt{
-			expr: ast.CallExpr{
-				mod: node.mod
-				pos: node.pos
-				language: .v
-				scope: node.scope
-				name: 'v.trace_calls.on_call'
-				args: [
-					ast.CallArg{
-						expr: ast.StringLiteral{
-							val: fname
-						}
-						typ: ast.string_type_idx
-					},
-				]
-			}
-		}
-		node.stmts.prepend(expr_stmt)
+pub fn (mut t Transformer) fn_decl_trace_calls(mut node ast.FnDecl) {
+	// Prepend ast Nodes for `eprintln(...)` to the `FnDecl`'s stmts list,
+	// to let the gen backend generate the target specific code for the print.
+	if node.no_body {
+		// Skip `C.fn()` calls
+		return
 	}
+	if node.name.starts_with('v.trace_calls.') {
+		// do not instrument the tracing functions, to avoid infinite regress
+		return
+	}
+	fname := if node.is_method {
+		receiver_name := global_table.type_to_str(node.receiver.typ)
+		'${node.mod} ${receiver_name}.${node.name}/${node.params.len}'
+	} else {
+		'${node.mod} ${node.name}/${node.params.len}'
+	}
+	if !t.pref.trace_fns.any(fname.match_glob(it)) {
+		return
+	}
+	expr_stmt := ast.ExprStmt{
+		expr: ast.CallExpr{
+			mod: node.mod
+			pos: node.pos
+			language: .v
+			scope: node.scope
+			name: 'v.trace_calls.on_call'
+			args: [
+				ast.CallArg{
+					expr: ast.StringLiteral{
+						val: fname
+					}
+					typ: ast.string_type_idx
+				},
+			]
+		}
+	}
+	node.stmts.prepend(expr_stmt)
 }

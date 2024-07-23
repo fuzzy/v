@@ -20,6 +20,7 @@ pub mut:
 
 @[params]
 pub struct TimerParams {
+pub:
 	should_print bool
 	label        string
 }
@@ -70,7 +71,10 @@ pub fn (mut t Timers) measure(name string) i64 {
 		eprintln('>   Available timers:')
 		eprintln('>   ${timer_keys}')
 	}
-	ms := t.swatches[name].elapsed().microseconds()
+	mut sw := t.swatches[name]
+	ms := sw.elapsed().microseconds()
+	sw.pause()
+	t.swatches[name] = sw
 	return ms
 }
 
@@ -111,8 +115,8 @@ pub fn (mut t Timers) message(name string) string {
 }
 
 pub fn (mut t Timers) show(label string) {
-	formatted_message := t.message(label)
 	if t.should_print {
+		formatted_message := t.message(label)
 		println(formatted_message)
 	}
 	t.already_shown << label

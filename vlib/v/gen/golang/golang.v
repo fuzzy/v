@@ -12,9 +12,9 @@ import os
 const bs = '\\'
 
 pub struct Gen {
+	pref &pref.Preferences = unsafe { nil }
 pub mut:
-	table &ast.Table        = unsafe { nil }
-	pref  &pref.Preferences = unsafe { nil }
+	table &ast.Table = unsafe { nil }
 	// is_debug           bool
 	out                strings.Builder
 	out_imports        strings.Builder
@@ -45,7 +45,7 @@ pub mut:
 	nlines             int
 }
 
-pub fn gen(files []&ast.File, table &ast.Table, out_file string, pref_ &pref.Preferences) (int, int) {
+pub fn gen(files []&ast.File, mut table ast.Table, out_file string, pref_ &pref.Preferences) (int, int) {
 	mut g := Gen{
 		table: table
 		pref: pref_
@@ -92,7 +92,7 @@ pub fn (mut f Gen) write(s string) {
 }
 
 pub fn (mut f Gen) writeln(s string) {
-	if f.indent > 0 && f.empty_line && s.len > 0 {
+	if f.indent > 0 && f.empty_line && s != '' {
 		f.write_indent()
 	}
 	f.out.writeln(s)
@@ -126,6 +126,7 @@ pub fn (mut f Gen) wrap_long_line(penalty_idx int, add_indent bool) bool {
 
 @[params]
 pub struct RemoveNewLineConfig {
+pub:
 	imports_buffer bool // Work on f.out_imports instead of f.out
 }
 
@@ -278,7 +279,7 @@ pub fn (mut f Gen) imports(imports []ast.Import) {
 
 	for imp in imports {
 		if imp.mod !in f.used_imports {
-			// TODO bring back once only unused imports are removed
+			// TODO: bring back once only unused imports are removed
 			// continue
 		}
 		if imp.mod in f.auto_imports && imp.mod !in f.used_imports {
@@ -904,7 +905,8 @@ pub fn (mut f Gen) enum_decl(node ast.EnumDecl) {
 
 pub fn (mut f Gen) fn_decl(node ast.FnDecl) {
 	f.attrs(node.attrs)
-	f.write(f.table.stringify_fn_decl(&node, f.cur_mod, f.mod2alias).replace('fn ', 'func '))
+	f.write(f.table.stringify_fn_decl(&node, f.cur_mod, f.mod2alias, false).replace('fn ',
+		'func '))
 	f.fn_body(node)
 }
 
@@ -1134,7 +1136,7 @@ pub fn (mut f Gen) interface_field(field ast.StructField) {
 
 pub fn (mut f Gen) interface_method(method ast.FnDecl) {
 	f.write('\t')
-	f.write(f.table.stringify_fn_decl(&method, f.cur_mod, f.mod2alias).after('fn '))
+	f.write(f.table.stringify_fn_decl(&method, f.cur_mod, f.mod2alias, false).after('fn '))
 	f.writeln('')
 	for param in method.params {
 		f.mark_types_import_as_used(param.typ)

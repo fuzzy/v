@@ -1,5 +1,4 @@
 import os
-import rand
 import term
 import v.util.diff
 import v.util.vtest
@@ -183,11 +182,13 @@ fn (mut tasks Tasks) add_checked_run(voptions string, result_extension string, t
 	tasks.add('', checker_dir, voptions, result_extension, tests, false)
 }
 
-fn (mut tasks Tasks) add(custom_vexe string, dir string, voptions string, result_extension string, tests []string, is_module bool) {
+fn (mut tasks Tasks) add(custom_vexe string, dir string, voptions string, result_extension string, tests []string,
+	is_module bool) {
 	tasks.add_evars('', custom_vexe, dir, voptions, result_extension, tests, is_module)
 }
 
-fn (mut tasks Tasks) add_evars(evars string, custom_vexe string, dir string, voptions string, result_extension string, tests []string, is_module bool) {
+fn (mut tasks Tasks) add_evars(evars string, custom_vexe string, dir string, voptions string, result_extension string,
+	tests []string, is_module bool) {
 	max_ntries := get_max_ntries()
 	paths := vtest.filter_vtest_only(tests, basepath: dir)
 	for path in paths {
@@ -238,6 +239,7 @@ fn (mut tasks Tasks) run() {
 		// cleaner error message, than a generic C error, but without the explanation.
 		m_skip_files << 'vlib/v/checker/tests/missing_c_lib_header_1.vv'
 		m_skip_files << 'vlib/v/checker/tests/missing_c_lib_header_with_explanation_2.vv'
+		m_skip_files << 'vlib/v/checker/tests/comptime_value_d_in_include_errors.vv'
 	}
 	$if msvc {
 		m_skip_files << 'vlib/v/checker/tests/asm_alias_does_not_exist.vv'
@@ -245,6 +247,7 @@ fn (mut tasks Tasks) run() {
 		// TODO: investigate why MSVC regressed
 		m_skip_files << 'vlib/v/checker/tests/missing_c_lib_header_1.vv'
 		m_skip_files << 'vlib/v/checker/tests/missing_c_lib_header_with_explanation_2.vv'
+		m_skip_files << 'vlib/v/checker/tests/comptime_value_d_in_include_errors.vv'
 	}
 	$if windows {
 		m_skip_files << 'vlib/v/checker/tests/modules/deprecated_module'
@@ -409,10 +412,10 @@ fn chunka(s []u8, chunk_size int) string {
 
 fn diff_content(expected string, found string) {
 	println(term.bold(term.yellow('diff: ')))
-	if diff_cmd := diff.find_working_diff_command() {
-		println(diff.color_compare_strings(diff_cmd, rand.ulid(), expected, found))
+	if diff_ := diff.compare_text(expected, found) {
+		println(diff_)
 	} else {
-		println('>>>> could not find a working diff command; dumping bytes instead...')
+		println('>>>> `${err}`; dumping bytes instead...')
 		println('expected bytes:\n${chunka(expected.bytes(), 25)}')
 		println('   found bytes:\n${chunka(found.bytes(), 25)}')
 		println('============')

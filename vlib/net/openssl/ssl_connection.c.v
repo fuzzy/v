@@ -7,8 +7,9 @@ import os
 
 // SSLConn is the current connection
 pub struct SSLConn {
+pub:
 	config SSLConnectConfig
-mut:
+pub mut:
 	sslctx   &C.SSL_CTX = unsafe { nil }
 	ssl      &C.SSL     = unsafe { nil }
 	handle   int
@@ -19,6 +20,7 @@ mut:
 
 @[params]
 pub struct SSLConnectConfig {
+pub:
 	verify   string // the path to a rootca.pem file, containing trusted CA certificate(s)
 	cert     string // the path to a cert.pem file, containing client certificate(s) for the request
 	cert_key string // the path to a key.pem file, containing private keys for the client certificate(s)
@@ -118,7 +120,7 @@ fn (mut s SSLConn) init() ! {
 		mut cert := s.config.cert
 		mut cert_key := s.config.cert_key
 		if s.config.in_memory_verification {
-			now := time.now().unix.str()
+			now := time.now().unix().str()
 			verify = os.temp_dir() + '/v_verify' + now
 			cert = os.temp_dir() + '/v_cert' + now
 			cert_key = os.temp_dir() + '/v_cert_key' + now
@@ -240,7 +242,7 @@ fn (mut s SSLConn) complete_connect() ! {
 		}
 		res := C.SSL_get_verify_result(voidptr(s.ssl))
 		if res != C.X509_V_OK {
-			return error('SSL handshake failed')
+			return error('SSL handshake failed (OpenSSL SSL_get_verify_result = ${res})')
 		}
 	}
 }
@@ -345,7 +347,7 @@ pub fn (mut s SSLConn) write_ptr(bytes &u8, len int) !int {
 					$if trace_ssl ? {
 						eprintln('${@METHOD} ---> res: ssl write on closed connection .ssl_error_zero_return')
 					}
-					return error('ssl write on closed connection') // Todo error_with_code close
+					return error('ssl write on closed connection') // TODO: error_with_code close
 				}
 				$if trace_ssl ? {
 					eprintln('${@METHOD} ---> res: could not write SSL, err_res: ${err_res}')

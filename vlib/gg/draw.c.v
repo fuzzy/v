@@ -3,9 +3,8 @@
 module gg
 
 import gx
-import sokol
-import sokol.sgl
 import math
+import sokol.sgl
 
 // draw_pixel draws one pixel on the screen.
 //
@@ -54,6 +53,7 @@ pub fn (ctx &Context) draw_line(x f32, y f32, x2 f32, y2 f32, c gx.Color) {
 	$if macos {
 		if ctx.native_rendering {
 			// Make the line more clear on hi dpi screens: draw a rectangle
+			// TODO this is broken if the line's x1 != x2
 			mut width := math.abs(x2 - x)
 			mut height := math.abs(y2 - y)
 			if width == 0 {
@@ -226,6 +226,7 @@ pub enum PaintStyle {
 
 @[params]
 pub struct DrawRectParams {
+pub:
 	x          f32
 	y          f32
 	w          f32
@@ -540,6 +541,13 @@ fn radius_to_segments(r f32) int {
 // `radius` defines the radius of the circle.
 // `c` is the color of the outline.
 pub fn (ctx &Context) draw_circle_empty(x f32, y f32, radius f32, c gx.Color) {
+	$if macos {
+		if ctx.native_rendering {
+			C.darwin_draw_circle_empty(x - radius + 1, ctx.height - (y + radius + 3),
+				radius, c)
+			return
+		}
+	}
 	if c.a != 255 {
 		sgl.load_pipeline(ctx.pipeline.alpha)
 	}
@@ -662,7 +670,8 @@ pub fn (ctx &Context) draw_circle_line(x f32, y f32, radius int, segments int, c
 }
 
 // draw_slice_empty draws the outline of a circle slice/pie
-pub fn (ctx &Context) draw_slice_empty(x f32, y f32, radius f32, start_angle f32, end_angle f32, segments int, c gx.Color) {
+pub fn (ctx &Context) draw_slice_empty(x f32, y f32, radius f32, start_angle f32, end_angle f32, segments int,
+	c gx.Color) {
 	if segments <= 0 || radius <= 0 {
 		return
 	}
@@ -698,7 +707,8 @@ pub fn (ctx &Context) draw_slice_empty(x f32, y f32, radius f32, start_angle f32
 // `end_angle` is the angle in radians at which the slice ends.
 // `segments` affects how smooth/round the slice is.
 // `c` is the fill color.
-pub fn (ctx &Context) draw_slice_filled(x f32, y f32, radius f32, start_angle f32, end_angle f32, segments int, c gx.Color) {
+pub fn (ctx &Context) draw_slice_filled(x f32, y f32, radius f32, start_angle f32, end_angle f32, segments int,
+	c gx.Color) {
 	if segments <= 0 || radius < 0 {
 		return
 	}
@@ -739,7 +749,8 @@ pub fn (ctx &Context) draw_slice_filled(x f32, y f32, radius f32, start_angle f3
 // `end_angle` is the angle in radians at which the arc ends.
 // `segments` affects how smooth/round the arc is.
 // `c` is the color of the arc/outline.
-pub fn (ctx Context) draw_arc_line(x f32, y f32, radius f32, start_angle f32, end_angle f32, segments int, c gx.Color) {
+pub fn (ctx Context) draw_arc_line(x f32, y f32, radius f32, start_angle f32, end_angle f32, segments int,
+	c gx.Color) {
 	if segments <= 0 || radius < 0 {
 		return
 	}
@@ -786,7 +797,8 @@ pub fn (ctx Context) draw_arc_line(x f32, y f32, radius f32, start_angle f32, en
 // `end_angle` is the angle in radians at which the arc ends.
 // `segments` affects how smooth/round the arc is.
 // `c` is the color of the arc outline.
-pub fn (ctx &Context) draw_arc_empty(x f32, y f32, inner_radius f32, thickness f32, start_angle f32, end_angle f32, segments int, c gx.Color) {
+pub fn (ctx &Context) draw_arc_empty(x f32, y f32, inner_radius f32, thickness f32, start_angle f32, end_angle f32,
+	segments int, c gx.Color) {
 	outer_radius := inner_radius + thickness
 	if segments <= 0 || outer_radius < 0 {
 		return
@@ -849,7 +861,8 @@ pub fn (ctx &Context) draw_arc_empty(x f32, y f32, inner_radius f32, thickness f
 // `end_angle` is the angle in radians at which the arc ends.
 // `segments` affects how smooth/round the arc is.
 // `c` is the fill color of the arc.
-pub fn (ctx &Context) draw_arc_filled(x f32, y f32, inner_radius f32, thickness f32, start_angle f32, end_angle f32, segments int, c gx.Color) {
+pub fn (ctx &Context) draw_arc_filled(x f32, y f32, inner_radius f32, thickness f32, start_angle f32, end_angle f32,
+	segments int, c gx.Color) {
 	outer_radius := inner_radius + thickness
 	if segments <= 0 || outer_radius < 0 {
 		return
@@ -956,7 +969,7 @@ pub fn (ctx &Context) draw_cubic_bezier(points []f32, c gx.Color) {
 // The four points is provided as one `points` array which contains a stream of point pairs (x and y coordinates).
 // Thus a cubic Bézier could be declared as: `points := [x1, y1, control_x1, control_y1, control_x2, control_y2, x2, y2]`.
 pub fn (ctx &Context) draw_cubic_bezier_in_steps(points []f32, steps u32, c gx.Color) {
-	if steps <= 0 || points.len != 8 {
+	if steps <= 0 || steps >= 20000 || points.len != 8 {
 		return
 	}
 	if c.a != 255 {

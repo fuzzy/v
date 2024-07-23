@@ -8,6 +8,9 @@ import v.token
 fn (mut c Checker) array_init(mut node ast.ArrayInit) ast.Type {
 	mut elem_type := ast.void_type
 	unwrap_elem_type := c.unwrap_generic(node.elem_type)
+	if c.pref.warn_about_allocs {
+		c.warn_alloc('array initialization', node.pos)
+	}
 	// `x := []string{}` (the type was set in the parser)
 	if node.typ != ast.void_type {
 		if node.elem_type != 0 {
@@ -305,6 +308,20 @@ fn (mut c Checker) eval_array_fixed_sizes(mut size_expr ast.Expr, size int, elem
 			ast.IntegerLiteral {
 				fixed_size = size_expr.val.int()
 			}
+			ast.ComptimeCall {
+				if size_expr.is_compile_value {
+					size_expr.resolve_compile_value(c.pref.compile_values) or {
+						c.error(err.msg(), size_expr.pos)
+					}
+					if size_expr.result_type != ast.i64_type {
+						c.error('value from \$d() can only be positive integers when used as fixed size',
+							size_expr.pos)
+					}
+					fixed_size = size_expr.compile_value.int()
+				} else {
+					c.error('only \$d() can be used for fixed size arrays', size_expr.pos)
+				}
+			}
 			ast.CastExpr {
 				if !size_expr.typ.is_pure_int() {
 					c.error('only integer types are allowed', size_expr.pos)
@@ -579,7 +596,8 @@ fn (mut c Checker) check_elements_ref_fields_initialized(typ ast.Type, pos &toke
 }
 
 // Recursively check the element, and its children for ref uninitialized fields
-fn (mut c Checker) do_check_elements_ref_fields_initialized(sym &ast.TypeSymbol, mut checked_types []ast.Type, pos &token.Pos) {
+fn (mut c Checker) do_check_elements_ref_fields_initialized(sym &ast.TypeSymbol, mut checked_types []ast.Type,
+	pos &token.Pos) {
 	if sym.info is ast.Struct {
 		linked_name := sym.name
 		// For now, let's call this method and give a notice instead of an error.
@@ -647,7 +665,11 @@ fn (mut c Checker) check_elements_initialized(typ ast.Type) ! {
 		return
 	}
 	if typ.is_any_kind_of_pointer() {
-		return checker.err_ref_uninitialized
+		if !c.pref.translated && !c.file.is_translated {
+			return checker.err_ref_uninitialized
+		} else {
+			return
+		}
 	}
 	sym := c.table.sym(typ)
 	if sym.kind == .interface_ {

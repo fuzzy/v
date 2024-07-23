@@ -13,6 +13,8 @@ import runtime
 import rand
 import strings
 
+pub const host_os = pref.get_host_os()
+
 pub const github_job = os.getenv('GITHUB_JOB')
 
 pub const runner_os = os.getenv('RUNNER_OS') // GitHub runner OS
@@ -44,6 +46,12 @@ pub const all_processes = get_all_processes()
 
 pub const header_bytes_to_search_for_module_main = 500
 pub const separator = '-'.repeat(100)
+
+pub const max_compilation_retries = get_max_compilation_retries()
+
+fn get_max_compilation_retries() int {
+	return os.getenv_opt('VTEST_MAX_COMPILATION_RETRIES') or { '3' }.int()
+}
 
 fn get_fail_retry_delay_ms() time.Duration {
 	return os.getenv_opt('VTEST_FAIL_RETRY_DELAY_MS') or { '500' }.int() * time.millisecond
@@ -77,6 +85,7 @@ pub mut:
 	build_tools   bool // builds only executables in cmd/tools; used by `v build-tools'
 	silent_mode   bool
 	show_stats    bool
+	show_asserts  bool
 	progress_mode bool
 	root_relative bool // used by CI runs, so that the output is stable everywhere
 	nmessages     chan LogMessage // many publishers, single consumer/printer
@@ -204,10 +213,12 @@ pub fn (mut ts TestSession) print_messages() {
 pub fn new_test_session(_vargs string, will_compile bool) TestSession {
 	mut skip_files := []string{}
 	if will_compile {
-		// Skip the call_v_from_c files. They need special instructions for compilation.
+		// Skip the call_v_from_* files. They need special instructions for compilation.
 		// Check the README.md for detailed information.
 		skip_files << 'examples/call_v_from_c/v_test_print.v'
 		skip_files << 'examples/call_v_from_c/v_test_math.v'
+		skip_files << 'examples/call_v_from_python/test.v' // the example only makes sense to be compiled, when python is installed
+		skip_files << 'examples/call_v_from_ruby/test.v' // the example only makes sense to be compiled, when ruby is installed
 		// Skip the compilation of the coroutines example for now, since the Photon wrapper
 		// is only available on macos for now, and it is not yet trivial enough to
 		// build/install on the CI:
@@ -218,7 +229,6 @@ pub fn new_test_session(_vargs string, will_compile bool) TestSession {
 			skip_files << 'vlib/v/tests/project_with_cpp_code/compiling_cpp_files_with_a_cplusplus_compiler_test.c.v'
 		}
 		$if solaris {
-			skip_files << 'examples/gg/gg2.v'
 			skip_files << 'examples/pico/pico.v'
 			skip_files << 'examples/pico/raw_callback.v'
 			skip_files << 'examples/sokol/fonts.v'
@@ -255,11 +265,12 @@ pub fn new_test_session(_vargs string, will_compile bool) TestSession {
 			}
 		}
 		if testing.runner_os != 'Linux' || testing.github_job != 'tcc' {
-			skip_files << 'examples/c_interop_wkhtmltopdf.v' // needs installation of wkhtmltopdf from https://github.com/wkhtmltopdf/packaging/releases
-			skip_files << 'examples/call_v_from_python/test.v' // the example only makes sense to be compiled, when python is installed
-			skip_files << 'examples/call_v_from_ruby/test.v' // the example only makes sense to be compiled, when ruby is installed
+			if !os.exists('/usr/local/include/wkhtmltox/pdf.h') {
+				skip_files << 'examples/c_interop_wkhtmltopdf.v' // needs installation of wkhtmltopdf from https://github.com/wkhtmltopdf/packaging/releases
+			}
 			skip_files << 'vlib/vweb/vweb_app_test.v' // imports the `sqlite` module, which in turn includes sqlite3.h
 			skip_files << 'vlib/x/vweb/tests/vweb_app_test.v' // imports the `sqlite` module, which in turn includes sqlite3.h
+			skip_files << 'vlib/veb/tests/veb_app_test.v' // imports the `sqlite` module, which in turn includes sqlite3.h
 		}
 		$if !macos {
 			skip_files << 'examples/macos_tray/tray.v'
@@ -270,30 +281,30 @@ pub fn new_test_session(_vargs string, will_compile bool) TestSession {
 		}
 		if testing.github_job == 'tests-sanitize-memory-clang' {
 			skip_files << 'vlib/net/openssl/openssl_compiles_test.c.v'
+			// Fails compilation with: `/usr/bin/ld: /lib/x86_64-linux-gnu/libpthread.so.0: error adding symbols: DSO missing from command line`
+			skip_files << 'examples/sokol/sounds/simple_sin_tones.v'
 		}
 		if testing.github_job != 'misc-tooling' {
 			// These examples need .h files that are produced from the supplied .glsl files,
 			// using by the shader compiler tools in https://github.com/floooh/sokol-tools-bin/archive/pre-feb2021-api-changes.tar.gz
-			skip_files << 'examples/sokol/simple_shader_glsl/simple_shader.v'
 			skip_files << 'examples/sokol/02_cubes_glsl/cube_glsl.v'
 			skip_files << 'examples/sokol/03_march_tracing_glsl/rt_glsl.v'
 			skip_files << 'examples/sokol/04_multi_shader_glsl/rt_glsl.v'
 			skip_files << 'examples/sokol/05_instancing_glsl/rt_glsl.v'
+			skip_files << 'examples/sokol/07_simple_shader_glsl/simple_shader.v'
+			skip_files << 'examples/sokol/08_sdf/sdf.v'
 			// Skip obj_viewer code in the CI
 			skip_files << 'examples/sokol/06_obj_viewer/show_obj.v'
-			// skip the audio examples too on most CI jobs
-			skip_files << 'examples/sokol/sounds/melody.v'
-			skip_files << 'examples/sokol/sounds/wav_player.v'
-			skip_files << 'examples/sokol/sounds/simple_sin_tones.v'
 		}
 		// requires special compilation flags: `-b wasm -os browser`, skip it for now:
 		skip_files << 'examples/wasm/mandelbrot/mandelbrot.wasm.v'
 		skip_files << 'examples/wasm/change_color_by_id/change_color_by_id.wasm.v'
 	}
+	skip_files = skip_files.map(os.abs_path)
 	vargs := _vargs.replace('-progress', '')
 	vexe := pref.vexe_path()
 	vroot := os.dir(vexe)
-	hash := '${sync.thread_id().hex()}_${time.sys_mono_now()}'
+	hash := '${sync.thread_id().hex()}_${rand.ulid()}'
 	new_vtmp_dir := setup_new_vtmp_folder(hash)
 	if term.can_show_color_on_stderr() {
 		os.setenv('VCOLORS', 'always', true)
@@ -304,6 +315,7 @@ pub fn new_test_session(_vargs string, will_compile bool) TestSession {
 		skip_files: skip_files
 		fail_fast: testing.fail_fast
 		show_stats: '-stats' in vargs.split(' ')
+		show_asserts: '-show-asserts' in vargs.split(' ')
 		vargs: vargs
 		vtmp_dir: new_vtmp_dir
 		hash: hash
@@ -379,6 +391,23 @@ pub fn (mut ts TestSession) test() {
 		if ts.build_tools && dot_relative_file.ends_with('_test.v') {
 			continue
 		}
+
+		// Skip OS-specific tests if we are not running that OS
+		// Special case for android_outside_termux because of its
+		// underscores
+		if file.ends_with('_android_outside_termux_test.v') {
+			if !testing.host_os.is_target_of('android_outside_termux') {
+				remaining_files << dot_relative_file
+				ts.skip_files << file
+				continue
+			}
+		}
+		os_target := file.all_before_last('_test.v').all_after_last('_')
+		if !testing.host_os.is_target_of(os_target) {
+			remaining_files << dot_relative_file
+			ts.skip_files << file
+			continue
+		}
 		remaining_files << dot_relative_file
 	}
 	remaining_files = vtest.filter_vtest_only(remaining_files, fix_slashes: false)
@@ -433,7 +462,8 @@ fn worker_trunner(mut p pool.PoolProcessor, idx int, thread_id int) voidptr {
 	}
 	tls_bench.no_cstep = true
 	tls_bench.njobs = ts.benchmark.njobs
-	mut relative_file := os.real_path(p.get_item[string](idx))
+	abs_path := os.real_path(p.get_item[string](idx))
+	mut relative_file := abs_path
 	mut cmd_options := [ts.vargs]
 	mut run_js := false
 
@@ -476,7 +506,8 @@ fn worker_trunner(mut p pool.PoolProcessor, idx int, thread_id int) voidptr {
 	// where an executable is not writable, if it is running).
 	// Note, that the common session temporary folder ts.vtmp_dir,
 	// will be removed after all tests are done.
-	mut test_folder_path := os.join_path(ts.vtmp_dir, rand.ulid())
+	test_id := '${idx}_${thread_id}'
+	mut test_folder_path := os.join_path(ts.vtmp_dir, test_id)
 	if ts.build_tools {
 		// `v build-tools`, produce all executables in the same session folder, so that they can be copied later:
 		test_folder_path = ts.vtmp_dir
@@ -507,7 +538,11 @@ fn worker_trunner(mut p pool.PoolProcessor, idx int, thread_id int) voidptr {
 		}
 	}
 
-	cmd := '${os.quoted_path(ts.vexe)} -skip-running ${cmd_options.join(' ')} ${os.quoted_path(file)}'
+	mut skip_running := '-skip-running'
+	if ts.show_stats {
+		skip_running = ''
+	}
+	cmd := '${os.quoted_path(ts.vexe)} ${skip_running} ${cmd_options.join(' ')} ${os.quoted_path(file)}'
 	run_cmd := if run_js {
 		'node ${os.quoted_path(generated_binary_fpath)}'
 	} else {
@@ -515,7 +550,7 @@ fn worker_trunner(mut p pool.PoolProcessor, idx int, thread_id int) voidptr {
 	}
 	ts.benchmark.step()
 	tls_bench.step()
-	if relative_file.replace('\\', '/') in ts.skip_files {
+	if !ts.build_tools && abs_path in ts.skip_files {
 		ts.benchmark.skip()
 		tls_bench.skip()
 		if !testing.hide_skips {
@@ -529,8 +564,6 @@ fn worker_trunner(mut p pool.PoolProcessor, idx int, thread_id int) voidptr {
 	mut compile_cmd_duration := time.Duration(0)
 	mut cmd_duration := time.Duration(0)
 	if ts.show_stats {
-		ts.reporter.divider()
-
 		ts.append_message(.cmd_begin, cmd, mtc)
 		d_cmd := time.new_stopwatch()
 
@@ -589,8 +622,16 @@ fn worker_trunner(mut p pool.PoolProcessor, idx int, thread_id int) voidptr {
 		}
 		ts.append_message(.compile_begin, cmd, mtc)
 		compile_d_cmd := time.new_stopwatch()
-		mut compile_r := os.execute(cmd)
-		compile_cmd_duration = compile_d_cmd.elapsed()
+		mut compile_r := os.Result{}
+		for cretry in 0 .. testing.max_compilation_retries {
+			compile_r = os.execute(cmd)
+			compile_cmd_duration = compile_d_cmd.elapsed()
+			// eprintln('>>>> cretry: $cretry | compile_r.exit_code: $compile_r.exit_code | compile_cmd_duration: ${compile_cmd_duration:8} | file: $normalised_relative_file')
+			if compile_r.exit_code == 0 {
+				break
+			}
+			random_sleep_ms(50, 100 * cretry)
+		}
 		ts.append_message_with_duration(.compile_end, compile_r.output, compile_cmd_duration,
 			mtc)
 		if compile_r.exit_code != 0 {
@@ -612,19 +653,28 @@ fn worker_trunner(mut p pool.PoolProcessor, idx int, thread_id int) voidptr {
 			}
 		}
 		//
+		mut retry := 1
 		ts.append_message(.cmd_begin, run_cmd, mtc)
 		mut failure_output := strings.new_builder(1024)
 		d_cmd := time.new_stopwatch()
 		mut r := os.execute(run_cmd)
 		cmd_duration = d_cmd.elapsed()
 		ts.append_message_with_duration(.cmd_end, r.output, cmd_duration, mtc)
+		if ts.show_asserts && r.exit_code == 0 {
+			println(r.output.split_into_lines().filter(it.contains(' assert')).join('\n'))
+		}
 		if r.exit_code != 0 {
+			mut details := get_test_details(file)
+			mut trimmed_output := r.output.trim_space()
+			if trimmed_output.len == 0 {
+				// retry running at least 1 more time, to avoid CI false positives as much as possible
+				details.retry++
+			}
 			failure_output.write_string(testing.separator)
-			failure_output.writeln(' retry: 0')
-			failure_output.writeln(r.output.trim_space())
-			details := get_test_details(file)
+			failure_output.writeln(' retry: 0 ; max_retry: ${details.retry} ; r.exit_code: ${r.exit_code} ; trimmed_output.len: ${trimmed_output.len}')
+			failure_output.writeln(trimmed_output)
 			os.setenv('VTEST_RETRY_MAX', '${details.retry}', true)
-			for retry := 1; retry <= details.retry; retry++ {
+			for retry = 1; retry <= details.retry; retry++ {
 				ts.append_message(.info, '                 retrying ${retry}/${details.retry} of ${relative_file} ; known flaky: ${details.flaky} ...',
 					mtc)
 				os.setenv('VTEST_RETRY', '${retry}', true)
@@ -640,9 +690,10 @@ fn worker_trunner(mut p pool.PoolProcessor, idx int, thread_id int) voidptr {
 						goto test_passed_execute
 					}
 				}
+				trimmed_output = r.output.trim_space()
 				failure_output.write_string(testing.separator)
-				failure_output.writeln(' retry: ${retry}')
-				failure_output.writeln(r.output.trim_space())
+				failure_output.writeln(' retry: ${retry} ; max_retry: ${details.retry} ; r.exit_code: ${r.exit_code} ; trimmed_output.len: ${trimmed_output.len}')
+				failure_output.writeln(trimmed_output)
 				time.sleep(testing.fail_retry_delay_ms)
 			}
 			full_failure_output := failure_output.str().trim_space()
@@ -657,7 +708,7 @@ fn worker_trunner(mut p pool.PoolProcessor, idx int, thread_id int) voidptr {
 			tls_bench.fail()
 			cmd_duration = d_cmd.elapsed() - (testing.fail_retry_delay_ms * details.retry)
 			ts.append_message_with_duration(.fail, tls_bench.step_message_with_label_and_duration(benchmark.b_fail,
-				'${normalised_relative_file}\n      comp_cmd: ${cmd}\n       run_cmd: ${run_cmd}\nfailure output:\n${full_failure_output}',
+				'${normalised_relative_file}\n         retry: ${retry}\n      comp_cmd: ${cmd}\n       run_cmd: ${run_cmd}\nfailure code: ${r.exit_code}; foutput.len: ${full_failure_output.len}; failure output:\n${full_failure_output}',
 				cmd_duration,
 				preparation: compile_cmd_duration
 			), cmd_duration, mtc)
@@ -837,4 +888,8 @@ pub fn eheader(msg string) {
 pub fn header(msg string) {
 	println(term.header_left(msg, '-'))
 	flush_stdout()
+}
+
+fn random_sleep_ms(min_ms int, random_add_ms int) {
+	time.sleep((100 + rand.intn(100) or { 0 }) * time.millisecond)
 }

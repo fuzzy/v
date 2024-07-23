@@ -142,6 +142,9 @@ pub const mime_types = {
 	'.3gp':    'video/3gpp'
 	'.3g2':    'video/3gpp2'
 	'.7z':     'application/x-7z-compressed'
+	'.m3u8':   'application/vnd.apple.mpegurl'
+	'.vsh':    'text/x-vlang'
+	'.v':      'text/x-vlang'
 }
 pub const max_http_post_size = 1024 * 1024
 pub const default_port = 8080
@@ -153,11 +156,10 @@ mut:
 	content_type string = 'text/plain'
 	status       string = '200 OK'
 	ctx          context.Context = context.EmptyContext{}
-pub:
+pub mut:
 	// HTTP Request
 	req http.Request
-	// TODO Response
-pub mut:
+	// TODO: Response
 	done bool
 	// time.ticks() from start of vweb connection handle.
 	// You can use it to determine how much time is spent on your request.
@@ -205,9 +207,9 @@ pub fn (ctx Context) init_server() {
 }
 
 // before_accept_loop is called once the vweb app is started, and listening, but before the loop that accepts
-// incomming request connections.
+// incoming request connections.
 // It will be called in the main thread, that runs vweb.run/2 or vweb.run_at/2.
-// It allows you to be notified about the successfull start of your app, and to synchronise your other threads
+// It allows you to be notified about the successful start of your app, and to synchronise your other threads
 // with the webserver start, without error prone and slow pooling or time.sleep waiting.
 // Defining this method is optional.
 pub fn (ctx &Context) before_accept_loop() {
@@ -219,7 +221,7 @@ pub fn (ctx &Context) before_accept_loop() {
 // Defining this method is optional.
 pub fn (ctx Context) before_request() {}
 
-// TODO - test
+// TODO: test
 // vweb intern function
 @[manualfree]
 pub fn (mut ctx Context) send_response_to_client(mimetype string, res string) bool {
@@ -276,7 +278,7 @@ pub fn (mut ctx Context) json_pretty[T](j T) Result {
 	return Result{}
 }
 
-// TODO - test
+// TODO: test
 // Response with file as payload
 pub fn (mut ctx Context) file(f_path string) Result {
 	if !os.exists(f_path) {
@@ -306,7 +308,7 @@ pub fn (mut ctx Context) ok(s string) Result {
 	return Result{}
 }
 
-// TODO - test
+// TODO: test
 // Response a server error
 pub fn (mut ctx Context) server_error(ecode int) Result {
 	$if debug {
@@ -321,6 +323,7 @@ pub fn (mut ctx Context) server_error(ecode int) Result {
 
 @[params]
 pub struct RedirectParams {
+pub:
 	status_code int = 302
 }
 
@@ -342,7 +345,7 @@ pub fn (mut ctx Context) redirect(url string, params RedirectParams) Result {
 
 // Send an not_found response
 pub fn (mut ctx Context) not_found() Result {
-	// TODO add a [must_be_returned] attribute, so that the caller is forced to use `return app.not_found()`
+	// TODO: add a [must_be_returned] attribute, so that the caller is forced to use `return app.not_found()`
 	if ctx.done {
 		return Result{}
 	}
@@ -351,7 +354,7 @@ pub fn (mut ctx Context) not_found() Result {
 	return Result{}
 }
 
-// TODO - test
+// TODO: test
 // Sets a cookie
 pub fn (mut ctx Context) set_cookie(cookie http.Cookie) {
 	cookie_raw := cookie.str()
@@ -367,7 +370,7 @@ pub fn (mut ctx Context) set_content_type(typ string) {
 	ctx.content_type = typ
 }
 
-// TODO - test
+// TODO: test
 // Sets a cookie with a `expire_date`
 pub fn (mut ctx Context) set_cookie_with_expire_date(key string, val string, expire_date time.Time) {
 	cookie := http.Cookie{
@@ -387,7 +390,7 @@ pub fn (ctx &Context) get_cookie(key string) !string {
 	//}
 }
 
-// TODO - test
+// TODO: test
 // Sets the response status
 pub fn (mut ctx Context) set_status(code int, desc string) {
 	if code < 100 || code > 599 {
@@ -397,13 +400,13 @@ pub fn (mut ctx Context) set_status(code int, desc string) {
 	}
 }
 
-// TODO - test
+// TODO: test
 // Adds an header to the response with key and val
 pub fn (mut ctx Context) add_header(key string, val string) {
 	ctx.header.add_custom(key, val) or {}
 }
 
-// TODO - test
+// TODO: test
 // Returns the header data from the key
 pub fn (ctx &Context) get_header(key string) string {
 	return ctx.req.header.get_custom(key) or { '' }
@@ -523,6 +526,7 @@ pub fn run[T](global_app &T, port int) {
 
 @[params]
 pub struct RunParams {
+pub:
 	family               net.AddrFamily = .ip6 // use `family: .ip, host: 'localhost'` when you want it to bind only to 127.0.0.1
 	host                 string
 	port                 int  = 8080
@@ -666,7 +670,8 @@ fn new_request_app[T](global_app &T, ctx Context, tid int) &T {
 }
 
 @[manualfree]
-fn handle_conn[T](mut conn net.TcpConn, global_app &T, controllers []&ControllerPath, routes &map[string]Route, tid int) {
+fn handle_conn[T](mut conn net.TcpConn, global_app &T, controllers []&ControllerPath, routes &map[string]Route,
+	tid int) {
 	conn.set_read_timeout(30 * time.second)
 	conn.set_write_timeout(30 * time.second)
 	defer {
@@ -690,7 +695,7 @@ fn handle_conn[T](mut conn net.TcpConn, global_app &T, controllers []&Controller
 	// Request parse
 	req := http.parse_request(mut reader) or {
 		// Prevents errors from being thrown when BufferedReader is empty
-		if '${err}' != 'none' {
+		if err !is io.Eof {
 			eprintln('[vweb] tid: ${tid:03d}, error parsing request: ${err}')
 		}
 		return
@@ -1042,7 +1047,7 @@ pub fn (mut ctx Context) host_handle_static(host string, directory_path string, 
 	return true
 }
 
-// TODO - test
+// TODO: test
 // mount_static_folder_at - makes all static files in `directory_path` and inside it, available at http://server/mount_path
 // For example: suppose you have called .mount_static_folder_at('/var/share/myassets', '/assets'),
 // and you have a file /var/share/myassets/main.css .
@@ -1051,13 +1056,13 @@ pub fn (mut ctx Context) mount_static_folder_at(directory_path string, mount_pat
 	return ctx.host_mount_static_folder_at('', directory_path, mount_path)
 }
 
-// TODO - test
+// TODO: test
 // host_mount_static_folder_at - makes all static files in `directory_path` and inside it, available at http://host/mount_path
 // For example: suppose you have called .host_mount_static_folder_at('localhost', '/var/share/myassets', '/assets'),
 // and you have a file /var/share/myassets/main.css .
 // => That file will be available at URL: http://localhost/assets/main.css .
 pub fn (mut ctx Context) host_mount_static_folder_at(host string, directory_path string, mount_path string) bool {
-	if ctx.done || mount_path.len < 1 || mount_path[0] != `/` || !os.exists(directory_path) {
+	if ctx.done || mount_path == '' || mount_path[0] != `/` || !os.exists(directory_path) {
 		return false
 	}
 	dir_path := directory_path.trim_right('/')
@@ -1067,14 +1072,14 @@ pub fn (mut ctx Context) host_mount_static_folder_at(host string, directory_path
 	return true
 }
 
-// TODO - test
+// TODO: test
 // Serves a file static
 // `url` is the access path on the site, `file_path` is the real path to the file, `mime_type` is the file type
 pub fn (mut ctx Context) serve_static(url string, file_path string) {
 	ctx.host_serve_static('', url, file_path)
 }
 
-// TODO - test
+// TODO: test
 // Serves a file static
 // `url` is the access path on the site, `file_path` is the real path to the file
 // `mime_type` is the file type, `host` is the host to serve the file from
@@ -1111,6 +1116,7 @@ pub fn (ctx &Context) ip() string {
 pub fn (mut ctx Context) error(s string) {
 	eprintln('[vweb] Context.error: ${s}')
 	ctx.form_error = s
+	// ctx.set_cookie(name: 'veb.error', value: s)
 }
 
 // Returns an empty result
@@ -1214,6 +1220,7 @@ fn (mut w Worker[T]) process_incoming_requests() {
 
 @[params]
 pub struct PoolParams[T] {
+pub:
 	handler    fn () T = unsafe { nil } @[required]
 	nr_workers int = runtime.nr_jobs()
 }

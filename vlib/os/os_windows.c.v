@@ -103,6 +103,8 @@ pub struct C._utimbuf {
 
 fn C._utime(&char, voidptr) int
 
+@[deprecated: 'os.args now uses arguments()']
+@[deprecated_after: '2024-07-30']
 fn init_os_args_wide(argc int, argv &&u8) []string {
 	mut args_ := []string{len: argc}
 	for i in 0 .. argc {
@@ -162,7 +164,7 @@ pub fn utime(path string, actime int, modtime int) ! {
 }
 
 pub fn ls(path string) ![]string {
-	if path.len == 0 {
+	if path == '' {
 		return error('ls() expects a folder, not an empty string')
 	}
 	mut find_file_data := Win32finddata{}
@@ -239,7 +241,7 @@ pub fn get_module_filename(handle HANDLE) !string {
 			}
 		}
 	}
-	panic('this should be unreachable') // TODO remove unreachable after loop
+	panic('this should be unreachable') // TODO: remove unreachable after loop
 }
 
 // Ref - https://docs.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-FormatMessageWa#parameters

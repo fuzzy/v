@@ -8,7 +8,6 @@ import strconv
 import v.token
 import v.pref
 import v.util
-import v.vet
 import v.errors
 import v.ast
 import v.mathutil
@@ -60,7 +59,6 @@ pub mut:
 	errors                      []errors.Error
 	warnings                    []errors.Warning
 	notices                     []errors.Notice
-	vet_errors                  []vet.Error
 	should_abort                bool // when too many errors/warnings/notices are accumulated, should_abort becomes true, and the scanner should stop
 }
 
@@ -241,7 +239,7 @@ fn (mut s Scanner) ident_name() string {
 	s.pos++
 	for s.pos < s.text.len {
 		c := s.text[s.pos]
-		if (c >= `a` && c <= `z`) || (c >= `A` && c <= `Z`) || (c >= `0` && c <= `9`) || c == `_` {
+		if c.is_alnum() || c == `_` {
 			s.pos++
 			continue
 		}
@@ -810,17 +808,9 @@ pub fn (mut s Scanner) text_scan() token.Token {
 				return s.new_token(.chartoken, ident_char, ident_char.len + 2) // + two quotes
 			}
 			`(` {
-				// TODO `$if vet {` for performance
-				if s.pref.is_vet && s.text[s.pos + 1] == ` ` {
-					s.vet_error('Looks like you are adding a space after `(`', .vfmt)
-				}
 				return s.new_token(.lpar, '', 1)
 			}
 			`)` {
-				// TODO `$if vet {` for performance
-				if s.pref.is_vet && s.text[s.pos - 1] == ` ` {
-					s.vet_error('Looks like you are adding a space before `)`', .vfmt)
-				}
 				return s.new_token(.rpar, '', 1)
 			}
 			`[` {
@@ -882,6 +872,12 @@ pub fn (mut s Scanner) text_scan() token.Token {
 				}
 			}
 			`&` {
+				if nextc == `&` {
+					if s.look_ahead(2) == `=` {
+						s.pos += 2
+						return s.new_token(.boolean_and_assign, '', 3)
+					}
+				}
 				if nextc == `=` {
 					s.pos++
 					return s.new_token(.and_assign, '', 2)
@@ -895,6 +891,10 @@ pub fn (mut s Scanner) text_scan() token.Token {
 			}
 			`|` {
 				if nextc == `|` {
+					if s.look_ahead(2) == `=` {
+						s.pos += 2
+						return s.new_token(.boolean_or_assign, '', 3)
+					}
 					s.pos++
 					return s.new_token(.logical_or, '', 2)
 				}
@@ -959,6 +959,16 @@ pub fn (mut s Scanner) text_scan() token.Token {
 				if nextc == `!` {
 					// treat shebang line (#!) as a comment
 					comment := s.text[start - 1..s.pos].trim_space()
+					if s.line_nr != 1 {
+						comment_pos := token.Pos{
+							line_nr: s.line_nr - 1
+							len: comment.len
+							pos: start
+							col: s.current_column() - comment.len
+						}
+						s.error_with_pos('a shebang is only valid at the top of the file',
+							comment_pos)
+					}
 					// s.fgenln('// shebang line "$s.line_comment"')
 					return s.new_token(.comment, comment, comment.len + 2)
 				}
@@ -1287,7 +1297,7 @@ pub fn (mut s Scanner) ident_string() string {
 				u32_escapes_pos << s.pos - 1
 			}
 			// Unknown escape sequence
-			if !is_escape_sequence(c) && !c.is_digit() && c != `\n` {
+			if !util.is_escape_sequence(c) && !c.is_digit() && c != `\n` {
 				s.error('`${c.ascii_str()}` unknown escape sequence')
 			}
 		}
@@ -1507,12 +1517,6 @@ fn trim_slash_line_break(s string) string {
 	return ret_str
 }
 
-@[inline]
-fn is_escape_sequence(c u8) bool {
-	return c in [`x`, `u`, `e`, `n`, `r`, `t`, `v`, `a`, `f`, `b`, `\\`, `\``, `$`, `@`, `?`, `{`,
-		`}`, `'`, `"`, `U`]
-}
-
 /// ident_char is called when a backtick "single-char" is parsed from the code
 /// it is needed because some runes (chars) are written with escape sequences
 /// the string it returns should be a standardized, simplified version of the character
@@ -1633,7 +1637,7 @@ pub fn (mut s Scanner) ident_char() string {
 		s.error_with_pos('invalid character literal, use \`\\n\` instead', lspos)
 	} else if c.len > len {
 		ch := c[c.len - 1]
-		if !is_escape_sequence(ch) && !ch.is_digit() {
+		if !util.is_escape_sequence(ch) && !ch.is_digit() {
 			s.error('`${ch.ascii_str()}` unknown escape sequence')
 		}
 	}
@@ -1801,18 +1805,6 @@ pub fn (mut s Scanner) error_with_pos(msg string, pos token.Pos) {
 			details: details
 		}
 	}
-}
-
-fn (mut s Scanner) vet_error(msg string, fix vet.FixKind) {
-	ve := vet.Error{
-		message: msg
-		file_path: s.file_path
-		pos: s.current_pos()
-		kind: .error
-		fix: fix
-		typ: .default
-	}
-	s.vet_errors << ve
 }
 
 fn (mut s Scanner) trace[T](fbase string, x &T) {

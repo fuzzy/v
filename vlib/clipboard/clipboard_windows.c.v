@@ -24,7 +24,8 @@ fn C.RegisterClassEx(class &WndClassEx) int
 
 fn C.GetClipboardOwner() C.HWND
 
-fn C.CreateWindowEx(dwExStyle i64, lpClassName &u16, lpWindowName &u16, dwStyle i64, x int, y int, nWidth int, nHeight int, hWndParent i64, hMenu voidptr, h_instance voidptr, lpParam voidptr) C.HWND
+fn C.CreateWindowEx(dwExStyle i64, lpClassName &u16, lpWindowName &u16, dwStyle i64, x int, y int, nWidth int,
+	nHeight int, hWndParent i64, hMenu voidptr, h_instance voidptr, lpParam voidptr) C.HWND
 
 // fn C.MultiByteToWideChar(CodePage u32, dw_flags u16, lpMultiByteStr byteptr, cbMultiByte int, lpWideCharStr u16, cchWideChar int) int
 fn C.EmptyClipboard()
@@ -60,7 +61,7 @@ pub struct Clipboard {
 	retry_delay int
 mut:
 	hwnd voidptr
-	foo  int // TODO remove
+	foo  int // TODO: remove
 }
 
 fn (cb &Clipboard) get_clipboard_lock() bool {
@@ -93,8 +94,8 @@ fn new_clipboard() &Clipboard {
 		cb_size: sizeof(WndClassEx)
 		lpfn_wnd_proc: voidptr(&C.DefWindowProc)
 		lpsz_class_name: class_name.to_wide()
-		lpsz_menu_name: 0
-		h_icon_sm: 0
+		lpsz_menu_name: unsafe { 0 }
+		h_icon_sm: unsafe { 0 }
 	}
 	if C.RegisterClassEx(voidptr(&wndclass)) == 0
 		&& C.GetLastError() != u32(C.ERROR_CLASS_ALREADY_EXISTS) {
