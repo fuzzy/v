@@ -225,21 +225,21 @@ pub fn (mut zftp FTP) dir() ![]string {
 		return error('Data channel empty')
 	}
 	list_dir := dtp.read()!
-	result, _ := zftp.read()!
+	result, _ := zftp.read() or { return error('LIST response failed') }
 	if result != close_data_connection {
 		println('`LIST` not ok')
 	}
 	dtp.close()
 	mut dir := []string{}
 	sdir := list_dir.bytestr()
-	for lfile in sdir.split('\n') {
-		if lfile.len > 56 {
-			dir << lfile#[56..lfile.len - 1]
+	for mut lfile in sdir.split('\n') {
+		lfile = lfile.trim_right(' \t\r')
+		if lfile.len == 0 {
 			continue
 		}
-		if lfile.len > 1 {
-			trimmed := lfile.after(':')
-			dir << trimmed#[3..trimmed.len - 1]
+		start, end := lfile.trim_indexes(' \t')
+		if start < end && end > 0 {
+			dir << lfile[start..end]
 		}
 	}
 	return dir
@@ -257,7 +257,7 @@ pub fn (mut zftp FTP) get(file string) ![]u8 {
 		return error('Data connection not ready')
 	}
 	blob := dtp.read()!
-	result, _ := zftp.read()!
+	result, _ := zftp.read() or { return error('RETR response failed') }
 	if result != complete {
 		return error('`RETR` not ok')
 	}
