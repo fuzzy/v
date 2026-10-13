@@ -25,6 +25,7 @@ const specify_password = 331
 const logged_in = 230
 const login_first = 503
 const anonymous = 530
+const already_open_data_connection = 125
 const open_data_connection = 150
 const close_data_connection = 226
 const command_ok = 200
@@ -220,7 +221,7 @@ pub fn (mut zftp FTP) dir() ![]string {
 	if code == denied {
 		return error('`LIST` denied')
 	}
-	if code != open_data_connection {
+	if code != open_data_connection && code != already_open_data_connection {
 		return error('Data channel empty')
 	}
 	list_dir := dtp.read()!
@@ -252,7 +253,7 @@ pub fn (mut zftp FTP) get(file string) ![]u8 {
 	if code == denied {
 		return error('Permission denied')
 	}
-	if code != open_data_connection {
+	if code != open_data_connection && code != already_open_data_connection {
 		return error('Data connection not ready')
 	}
 	blob := dtp.read()!
